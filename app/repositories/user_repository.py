@@ -169,3 +169,23 @@ class UserRepository:
         )
 
         await self.db.commit()
+
+    # ==========================================================
+    # Update Profile
+    # ==========================================================
+
+    async def update_profile(
+        self,
+        user_id: str,
+        **kwargs,
+    ) -> User | None:
+
+        if kwargs:
+            await self.db.execute(
+                update(User)
+                .where(User.id == user_id)
+                .values(**kwargs)
+            )
+            await self.db.commit()
+
+        return await self.get_by_id(user_id)

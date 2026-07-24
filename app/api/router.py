@@ -1,10 +1,45 @@
-"""Main router aggregator."""
+"""Main API Router Aggregator."""
 
 from fastapi import APIRouter
 
-from app.api.v1 import auth
+from app.api.v1 import (
+    admin,
+    auth,
+    cart,
+    categories,
+    checkout,
+    contact,
+    coupons,
+    customer,
+    home,
+    inventory,
+    orders,
+    payments,
+    products,
+    refunds,
+    tickets,
+    users,
+    webhooks,
+    wishlist,
+)
 from app.core.config import settings
 
 api_router = APIRouter(prefix=settings.API_V1_PREFIX)
 api_router.include_router(auth.router)
-
+api_router.include_router(users.router)
+api_router.include_router(customer.router)
+api_router.include_router(home.router)
+api_router.include_router(products.router)
+api_router.include_router(categories.router)
+api_router.include_router(cart.router)
+api_router.include_router(wishlist.router)
+api_router.include_router(checkout.router)
+api_router.include_router(payments.router)
+api_router.include_router(orders.router)
+api_router.include_router(webhooks.router)
+api_router.include_router(refunds.router)
+api_router.include_router(tickets.router)
+api_router.include_router(coupons.router)
+api_router.include_router(inventory.router)
+api_router.include_router(contact.router)
+api_router.include_router(admin.router)

@@ -11,6 +11,32 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.core.config import settings
+from app.db.base import Base
+
+# Import all models so they are registered with SQLAlchemy metadata
+from app.models.refresh_token import RefreshToken  # noqa: F401
+from app.models.user import User  # noqa: F401
+from app.models.product import Product  # noqa: F401
+from app.models.banner import Banner  # noqa: F401
+from app.models.testimonial import Testimonial  # noqa: F401
+from app.models.site_config import SiteConfig  # noqa: F401
+from app.models.address import CustomerAddress  # noqa: F401
+from app.models.coupon import Coupon  # noqa: F401
+from app.models.order import Order, OrderItem  # noqa: F401
+from app.models.ticket import SupportTicket  # noqa: F401
+from app.models.notification import Notification  # noqa: F401
+from app.models.contact import ContactMessage  # noqa: F401
+from app.models.review import ProductReview  # noqa: F401
+from app.models.reel import InstagramReel  # noqa: F401
+from app.models.category import Category  # noqa: F401
+from app.models.cart import Cart, CartItem  # noqa: F401
+from app.models.wishlist import WishlistItem  # noqa: F401
+from app.models.payment import Payment  # noqa: F401
+from app.models.refund import Refund  # noqa: F401
+from app.models.inventory import InventoryLog  # noqa: F401
+from app.models.faq import FAQ  # noqa: F401
+from app.models.audit_log import AuditLog  # noqa: F401
+from app.models.offline_sale import OfflineSale  # noqa: F401
 
 # ==========================================================
 # Create Async Engine
@@ -33,6 +59,20 @@ AsyncSessionLocal = async_sessionmaker(
     autoflush=False,
     expire_on_commit=False,
 )
+
+# ==========================================================
+# Database Initialization
+# ==========================================================
+
+
+async def init_db() -> None:
+    """
+    Create database tables if they do not already exist.
+    """
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
 
 # ==========================================================
 # Dependency

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field
 
 
 # ==========================================================
@@ -48,7 +48,6 @@ class GoogleLoginRequest(BaseModel):
 # ==========================================================
 
 class SetPasswordRequest(BaseModel):
-    user_id: str
     password: str = Field(..., min_length=8)
     confirm_password: str
 
@@ -62,6 +61,14 @@ class ForgotPasswordRequest(BaseModel):
 
 
 # ==========================================================
+# Resend Registration OTP
+# ==========================================================
+
+class ResendOTPRequest(BaseModel):
+    email: EmailStr
+
+
+# ==========================================================
 # Verify Forgot Password OTP
 # ==========================================================
 
@@ -71,11 +78,20 @@ class VerifyForgotPasswordOTPRequest(BaseModel):
 
 
 # ==========================================================
+# Resend Forgot Password OTP
+# ==========================================================
+
+class ResendForgotOTPRequest(BaseModel):
+    email: EmailStr
+
+
+# ==========================================================
 # Reset Password
 # ==========================================================
 
 class ResetPasswordRequest(BaseModel):
     email: EmailStr
+    otp: str = Field(..., min_length=6, max_length=6)
     password: str = Field(..., min_length=8)
     confirm_password: str
 
@@ -88,18 +104,3 @@ class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str = Field(..., min_length=8)
     confirm_password: str
-
-
-# ==========================================================
-# User Response
-# ==========================================================
-
-class UserResponse(BaseModel):
-    id: str
-    full_name: str
-    email: EmailStr
-    role: str
-    is_email_verified: bool
-    is_active: bool
-
-    model_config = ConfigDict(from_attributes=True)

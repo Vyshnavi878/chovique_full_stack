@@ -78,12 +78,32 @@ class Settings(BaseSettings):
     MAIL_SSL_TLS: bool = False
 
     OTP_EXPIRE_SECONDS: int = 300
+    MAX_OTP_ATTEMPTS: int = 3
 
     # =====================================================
     # Google OAuth
     # =====================================================
-    GOOGLE_CLIENT_ID: str
-    GOOGLE_CLIENT_SECRET: str
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+
+    # =====================================================
+    # Razorpay
+    # =====================================================
+    RAZORPAY_KEY_ID: str = "rzp_test_placeholder"
+    RAZORPAY_KEY_SECRET: str = "secret_placeholder"
+    RAZORPAY_WEBHOOK_SECRET: str = "webhook_secret_placeholder"
+
+    # =====================================================
+    # Resend Email
+    # =====================================================
+    RESEND_API_KEY: str = ""
+
+    # =====================================================
+    # Cloudinary
+    # =====================================================
+    CLOUDINARY_CLOUD_NAME: str = ""
+    CLOUDINARY_API_KEY: str = ""
+    CLOUDINARY_API_SECRET: str = ""
 
 
 @lru_cache

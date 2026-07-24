@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +21,13 @@ from app.core.security import (
 )
 
 from app.core.config import settings
+from app.core.exceptions import (
+    InvalidOTPError,
+    MaxAttemptsExceededError,
+    OTPExpiredError,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class AuthService:
@@ -44,6 +52,8 @@ class AuthService:
         self,
         request: RegisterRequest
     ):
+
+        logger.info("Registration attempt for email=%s", request.email)
 
         # Check password confirmation
 
@@ -70,7 +80,7 @@ class AuthService:
         otp = self.otp_service.generate_otp()
 
 
-        # Save OTP
+        # Save OTP (also resets attempts)
 
         await self.otp_service.save_otp(
             email=request.email,
@@ -86,9 +96,12 @@ class AuthService:
             otp=otp,
         )
 
+        logger.info("Registration OTP sent to %s", request.email)
 
         return {
-            "message": "OTP sent successfully."
+            "message": "OTP sent successfully.",
+            "email": request.email,
+            "expires_in": settings.OTP_EXPIRE_SECONDS,
         }
 
 
@@ -105,20 +118,14 @@ class AuthService:
         password: str,
     ):
 
+        logger.info("Verifying registration OTP for email=%s", email)
 
-        # Verify OTP
-
-        is_valid = await self.otp_service.verify_otp(
+        # Verify OTP — raises typed exceptions on failure
+        await self.otp_service.verify_otp(
             email=email,
             otp=otp,
             purpose="register",
         )
-
-
-        if not is_valid:
-            raise ValueError(
-                "Invalid or expired OTP."
-            )
 
 
         # Check user again
@@ -184,6 +191,7 @@ class AuthService:
             expires_at=expires_at,
         )
 
+        logger.info("User registered successfully: id=%s email=%s", user.id, email)
 
         return {
 
@@ -195,7 +203,8 @@ class AuthService:
 
             "refresh_token": refresh_token,
         }
-        # ======================================================
+
+    # ======================================================
     # LOGIN
     # ======================================================
 
@@ -203,6 +212,8 @@ class AuthService:
         self,
         request: LoginRequest
     ):
+
+        logger.info("Login attempt for email=%s", request.email)
 
         # Find user
 
@@ -290,6 +301,7 @@ class AuthService:
             datetime.now(timezone.utc),
         )
 
+        logger.info("Login successful for user_id=%s", user.id)
 
         return {
 
@@ -313,6 +325,7 @@ class AuthService:
         id_token: str
     ):
 
+        logger.info("Google login attempt")
 
         # Verify Google token
 
@@ -417,6 +430,7 @@ class AuthService:
             datetime.now(timezone.utc),
         )
 
+        logger.info("Google login successful for user_id=%s", user.id)
 
         return {
 
@@ -535,6 +549,62 @@ class AuthService:
 
 
 
+    # ======================================================
+    # RESEND REGISTRATION OTP
+    # ======================================================
+
+    async def resend_otp(
+        self,
+        email: str,
+    ):
+
+        logger.info("Resend registration OTP request for email=%s", email)
+
+        existing_user = await self.user_repo.get_by_email(
+            email
+        )
+
+        if existing_user:
+            raise ValueError(
+                "Email already registered."
+            )
+
+        can_resend = await self.otp_service.can_resend(
+            email
+        )
+
+        if not can_resend:
+            raise ValueError(
+                "Please wait before requesting another OTP."
+            )
+
+        otp = self.otp_service.generate_otp()
+
+        # save_otp automatically resets attempts
+        await self.otp_service.save_otp(
+            email=email,
+            otp=otp,
+            purpose="register",
+        )
+
+        await self.otp_service.start_resend_cooldown(
+            email
+        )
+
+        await self.mail_service.send_registration_otp(
+            email=email,
+            otp=otp,
+        )
+
+        logger.info("Registration OTP resent to %s", email)
+
+        return {
+            "message": "OTP resent successfully.",
+            "email": email,
+            "expires_in": settings.OTP_EXPIRE_SECONDS,
+        }
+
+
 
     # ======================================================
     # FORGOT PASSWORD
@@ -545,6 +615,7 @@ class AuthService:
         email: str
     ):
 
+        logger.info("Forgot password request for email=%s", email)
 
         user = await self.user_repo.get_by_email(
             email
@@ -558,7 +629,7 @@ class AuthService:
             return {
 
                 "message":
-                "If email exists OTP has been sent."
+                "If email exists, OTP has been sent.",
 
             }
 
@@ -567,6 +638,7 @@ class AuthService:
         otp = self.otp_service.generate_otp()
 
 
+        # save_otp automatically resets attempts
         await self.otp_service.save_otp(
 
             email=email,
@@ -586,15 +658,97 @@ class AuthService:
 
         )
 
+        logger.info("Forgot password OTP sent to %s", email)
 
         return {
 
             "message":
-            "If email exists OTP has been sent."
+            "If email exists, OTP has been sent.",
 
         }
 
 
+
+
+    # ======================================================
+    # VERIFY FORGOT PASSWORD OTP
+    # ======================================================
+
+    async def verify_forgot_password_otp(
+        self,
+        email: str,
+        otp: str,
+    ):
+        """Verify OTP for forgot password flow (separate from reset)."""
+
+        logger.info("Verifying forgot password OTP for email=%s", email)
+
+        # Raises typed exceptions on failure
+        await self.otp_service.verify_otp(
+            email=email,
+            otp=otp,
+            purpose="forgot",
+        )
+
+        logger.info("Forgot password OTP verified for %s", email)
+
+        return {
+            "message": "OTP verified successfully.",
+        }
+
+
+    # ======================================================
+    # RESEND FORGOT PASSWORD OTP
+    # ======================================================
+
+    async def resend_forgot_password_otp(
+        self,
+        email: str,
+    ):
+        """Resend OTP for forgot password flow."""
+
+        logger.info("Resend forgot password OTP request for email=%s", email)
+
+        can_resend = await self.otp_service.can_resend(
+            email
+        )
+
+        if not can_resend:
+            raise ValueError(
+                "Please wait before requesting another OTP."
+            )
+
+        user = await self.user_repo.get_by_email(email)
+
+        # Don't expose email existence
+        if not user:
+            return {
+                "message": "If email exists, OTP has been sent.",
+            }
+
+        otp = self.otp_service.generate_otp()
+
+        # save_otp automatically resets attempts
+        await self.otp_service.save_otp(
+            email=email,
+            otp=otp,
+            purpose="forgot",
+        )
+
+        await self.otp_service.start_resend_cooldown(
+            email
+        )
+
+        await self.mail_service.send_forgot_password_otp(
+            email=email,
+            otp=otp,
+        )
+
+        logger.info("Forgot password OTP resent to %s", email)
+
+        return {
+            "message": "If email exists, OTP has been sent.",
+        }
 
 
     # ======================================================
@@ -615,6 +769,7 @@ class AuthService:
 
     ):
 
+        logger.info("Reset password attempt for email=%s", email)
 
         if password != confirm_password:
 
@@ -623,7 +778,8 @@ class AuthService:
             )
 
 
-        valid = await self.otp_service.verify_otp(
+        # Raises typed exceptions on failure
+        await self.otp_service.verify_otp(
 
             email=email,
 
@@ -632,13 +788,6 @@ class AuthService:
             purpose="forgot",
 
         )
-
-
-        if not valid:
-
-            raise ValueError(
-                "Invalid or expired OTP."
-            )
 
 
 
@@ -670,6 +819,7 @@ class AuthService:
             user.id
         )
 
+        logger.info("Password reset successful for user_id=%s", user.id)
 
         return {
 
@@ -677,7 +827,8 @@ class AuthService:
             "Password reset successful."
 
         }
-        # ======================================================
+
+    # ======================================================
     # CHANGE PASSWORD
     # ======================================================
 
@@ -930,7 +1081,6 @@ class AuthService:
 
 
 
-
     # ======================================================
     # LOGOUT
     # ======================================================
@@ -970,5 +1120,3 @@ class AuthService:
             "Logout successful."
 
         }
-
-        

@@ -1,7 +1,9 @@
+import logging
 from fastapi_mail import ConnectionConfig, FastMail, MessageSchema, MessageType
 
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
 
 conf = ConnectionConfig(
     MAIL_USERNAME=settings.MAIL_USERNAME,
@@ -43,7 +45,16 @@ class MailService:
 
         fm = FastMail(conf)
 
-        await fm.send_message(message)
+        try:
+            await fm.send_message(message)
+        except Exception as e:
+            logger.error(f"Failed to send registration OTP email to {email}: {e}")
+            if settings.DEBUG:
+                print(f"\n==========================================")
+                print(f"[DEV MODE - MAIL FAILED] Registration OTP for {email}: {otp}")
+                print(f"==========================================\n")
+            else:
+                raise e
 
     @staticmethod
     async def send_forgot_password_otp(
@@ -70,4 +81,13 @@ class MailService:
 
         fm = FastMail(conf)
 
-        await fm.send_message(message)
+        try:
+            await fm.send_message(message)
+        except Exception as e:
+            logger.error(f"Failed to send forgot password OTP email to {email}: {e}")
+            if settings.DEBUG:
+                print(f"\n==========================================")
+                print(f"[DEV MODE - MAIL FAILED] Forgot Password OTP for {email}: {otp}")
+                print(f"==========================================\n")
+            else:
+                raise e

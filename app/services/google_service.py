@@ -1,7 +1,11 @@
+import logging
+
 from google.auth.transport import requests
 from google.oauth2 import id_token
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class GoogleService:
@@ -30,5 +34,6 @@ class GoogleService:
                 ),
             }
 
-        except Exception:
+        except Exception as e:
+            logger.error("Google token verification failed: %s", str(e))
             return None
