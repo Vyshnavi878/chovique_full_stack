@@ -104,6 +104,7 @@ async def create_product(
     price: float = Form(...),
     original_price: Optional[float] = Form(default=None),
     weight: Optional[str] = Form(default=None),
+    stock: Optional[int] = Form(default=10),
     description: Optional[str] = Form(default=None),
     ingredients: Optional[str] = Form(default=None),
     badge: Optional[str] = Form(default=None),
@@ -122,16 +123,32 @@ async def create_product(
 ):
     from app.schemas.product import NutritionInfo as _NutritionInfo
 
+    # Clean category & badge enums
+    valid_categories = ["dark", "milk", "white", "gift", "beverage"]
+    clean_cat = category.lower().strip() if (category and category.lower().strip() in valid_categories) else "dark"
+
+    valid_badges = ["Bestseller", "New", "Premium", "Limited"]
+    clean_badge = badge if (badge and badge in valid_badges) else None
+
+    from app.integrations.cloudinary import cloudinary_service
+
     # Handle image upload
     image_url: Optional[str] = None
-    if image and image.filename:
-        _os.makedirs("static/products", exist_ok=True)
-        ext = image.filename.rsplit(".", 1)[-1] if "." in image.filename else "jpg"
-        filename = f"{_uuid.uuid4().hex}.{ext}"
-        filepath = _os.path.join("static/products", filename)
-        with open(filepath, "wb") as f:
-            f.write(await image.read())
-        image_url = f"/static/products/{filename}"
+    if image and hasattr(image, "filename") and image.filename:
+        try:
+            content = await image.read()
+            if content:
+                image_url = await cloudinary_service.upload_image(
+                    file_bytes=content,
+                    filename=image.filename,
+                    folder="products",
+                )
+        except Exception as err:
+            logger.warning("Failed to upload product image file: %s", err)
+
+
+    if not image_url:
+        image_url = "https://images.unsplash.com/photo-1548907040-4d42b52115ca?auto=format&fit=crop&w=600&q=80"
 
     nutrition = None
     if any([nutrition_calories, nutrition_total_fat, nutrition_saturated_fat,
@@ -148,20 +165,22 @@ async def create_product(
 
     data = ProductCreate(
         name=name,
-        category=category,
+        category=clean_cat,
         price=price,
         original_price=original_price,
         weight=weight,
+        stock=stock if stock is not None else 10,
         description=description,
         ingredients=ingredients,
         nutrition=nutrition,
-        badge=badge,
+        badge=clean_badge,
         image=image_url,
         sort_order=sort_order,
     )
 
     service = ProductService(db)
     return await service.create_product(data)
+
 
 
 # ======================================================

@@ -1,8 +1,11 @@
 from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.db.session import get_db
 from app.models.user import User
-from app.schemas.user import UserResponse
+from app.repositories.address_repository import AddressRepository
+from app.schemas.user import UserResponse, AddressSchema
 
 router = APIRouter( prefix="/users", tags=["Users"],)
 
@@ -14,5 +17,28 @@ router = APIRouter( prefix="/users", tags=["Users"],)
 @router.get( "/me",response_model=UserResponse,)
 async def get_me(
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    return current_user
+    # Fetch addresses explicitly instead of accessing current_user.addresses,
+    # which lazy-loads outside an awaited context under async SQLAlchemy and
+    # raises sqlalchemy.exc.MissingGreenlet.
+    addresses = await AddressRepository(db).get_user_addresses(current_user.id)
+    default_address = next(
+        (addr for addr in addresses if addr.is_default),
+        None,
+    )
+
+    user = UserResponse.from_orm_user(current_user)
+
+    if default_address:
+        user.profile.address = AddressSchema(
+            street=default_address.street,
+            city=default_address.city,
+            state=default_address.state,
+            zip=default_address.zip,
+        )
+
+    return user
+
+
+

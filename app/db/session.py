@@ -65,13 +65,20 @@ AsyncSessionLocal = async_sessionmaker(
 # ==========================================================
 
 
+from sqlalchemy import text
+
+
 async def init_db() -> None:
     """
-    Create database tables if they do not already exist.
+    Create database tables if they do not already exist and run schema migrations.
     """
 
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+        await connection.execute(
+            text("ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INTEGER NOT NULL DEFAULT 100;")
+        )
+
 
 
 # ==========================================================

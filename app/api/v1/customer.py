@@ -41,6 +41,16 @@ async def update_profile(
     response_model=AvatarUploadResponse,
     summary="Upload user avatar image",
 )
+@router.put(
+    "/avatar",
+    response_model=AvatarUploadResponse,
+    summary="Update user avatar image",
+)
+@router.patch(
+    "/avatar",
+    response_model=AvatarUploadResponse,
+    summary="Update user avatar image",
+)
 async def upload_avatar(
     avatar: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
@@ -177,6 +187,6 @@ async def delete_notification(
     db: AsyncSession = Depends(get_db),
 ):
     service = CustomerService(db)
-    deleted = await service.delete_notification(current_user.id, notification_id)
-    if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found.")
+    await service.delete_notification(current_user.id, notification_id)
+    return None
+

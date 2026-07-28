@@ -15,7 +15,6 @@ from app.core.exceptions import (
     OTPError,
 )
 from app.db.session import AsyncSessionLocal, init_db
-from app.db.seed_data import seed_database
 
 # ==========================================================
 # Logging Configuration
@@ -42,10 +41,6 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database tables initialized.")
 
-    # Seed data
-    async with AsyncSessionLocal() as session:
-        await seed_database(session)
-
     logger.info("Application startup complete.")
     yield
     logger.info("Application shutting down.")
@@ -71,14 +66,37 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 app.add_middleware(AuditLogMiddleware)
 
-if settings.ALLOWED_ORIGINS:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.ALLOWED_ORIGINS,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+raw_origins = settings.ALLOWED_ORIGINS
+origins_list = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+if raw_origins:
+    if isinstance(raw_origins, list):
+        origins_list.extend([o for o in raw_origins if o not in origins_list])
+    elif isinstance(raw_origins, str):
+        for o in raw_origins.split(","):
+            o_clean = o.strip()
+            if o_clean and o_clean not in origins_list:
+                origins_list.append(o_clean)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins_list,
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
+
+
 
 app.include_router(api_router)
 

@@ -340,51 +340,36 @@ class AuthService:
             )
 
 
-        # Find user
-
-        user = await self.user_repo.get_by_email(
-            google_user["email"]
+        # 1. Check if user exists by google_id first
+        user = await self.user_repo.get_by_google_id(
+            google_user["google_id"]
         )
 
-
-        # First time Google login
-
+        # 2. If not found by google_id, check by email
         if not user:
-
-
-            user = await self.user_repo.create(
-
-                full_name=google_user["full_name"],
-
-                email=google_user["email"],
-
-                hashed_password=None,
-
-                google_id=google_user["google_id"],
-
-                avatar_url=google_user["avatar_url"],
-
-                role="customer",
-
-                is_email_verified=True,
-
-                is_active=True,
+            user = await self.user_repo.get_by_email(
+                google_user["email"]
             )
+            if user:
+                # Link existing email account with Google ID
+                await self.user_repo.update_google_data(
+                    user.id,
+                    google_id=google_user["google_id"],
+                    avatar_url=google_user["avatar_url"],
+                )
+                user.google_id = google_user["google_id"]
 
-
-        # Existing email user linking Google
-
-        elif not user.google_id:
-
-
-            await self.user_repo.update_google_data(
-
-                user.id,
-
+        # 3. First time Google user (neither google_id nor email exists)
+        if not user:
+            user = await self.user_repo.create(
+                full_name=google_user["full_name"],
+                email=google_user["email"],
+                hashed_password=None,
                 google_id=google_user["google_id"],
-
                 avatar_url=google_user["avatar_url"],
-
+                role="customer",
+                is_email_verified=True,
+                is_active=True,
             )
 
 
@@ -560,14 +545,13 @@ class AuthService:
 
         logger.info("Resend registration OTP request for email=%s", email)
 
-        existing_user = await self.user_repo.get_by_email(
-            email
-        )
+        existing_user = await self.user_repo.get_by_email(email)
 
-        if existing_user:
-            raise ValueError(
-                "Email already registered."
-            )
+        if not existing_user:
+            raise ValueError("Registration not found.")
+
+        if existing_user.is_email_verified:
+            raise ValueError("Email already registered.")
 
         can_resend = await self.otp_service.can_resend(
             email
@@ -651,21 +635,16 @@ class AuthService:
 
 
         await self.mail_service.send_forgot_password_otp(
-
             email=email,
-
             otp=otp,
-
         )
 
         logger.info("Forgot password OTP sent to %s", email)
 
-        return {
-
-            "message":
-            "If email exists, OTP has been sent.",
-
-        }
+        res = {"message": "If email exists, OTP has been sent."}
+        if settings.DEBUG:
+            res["dev_otp"] = otp
+        return res
 
 
 
@@ -746,9 +725,10 @@ class AuthService:
 
         logger.info("Forgot password OTP resent to %s", email)
 
-        return {
-            "message": "If email exists, OTP has been sent.",
-        }
+        res = {"message": "If email exists, OTP has been sent."}
+        if settings.DEBUG:
+            res["dev_otp"] = otp
+        return res
 
 
     # ======================================================

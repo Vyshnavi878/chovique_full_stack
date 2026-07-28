@@ -27,13 +27,19 @@ class InventoryService:
         if not product:
             raise ValueError("Product not found.")
 
-        new_stock = max(0, product.stock + payload.change_quantity)
+        if payload.new_stock is not None:
+            new_stock = max(0, payload.new_stock)
+            change = new_stock - product.stock
+        else:
+            change = payload.change_quantity or 0
+            new_stock = max(0, product.stock + change)
+
         updated_product = await self.product_repo.update(product.id, stock=new_stock)
 
         await self.inventory_repo.log_change(
             product_id=product.id,
-            change_quantity=payload.change_quantity,
-            reason=payload.reason,
+            change_quantity=change,
+            reason=payload.reason or "restock",
             notes=payload.notes,
             performed_by=performed_by_id,
         )
@@ -42,9 +48,10 @@ class InventoryService:
             "Stock updated for product %s: old=%d, change=%d, new=%d",
             product.id,
             product.stock,
-            payload.change_quantity,
+            change,
             new_stock,
         )
+
 
         return ProductResponse.from_orm_model(updated_product)
 

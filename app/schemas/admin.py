@@ -49,3 +49,11 @@ class ImportSalesResponse(BaseModel):
     imported: int
     skipped: int
     message: str
+
+
+class CreateAdminRequest(BaseModel):
+    full_name: str
+    email: str
+    password: str
+    scope: Optional[str] = "All Boutiques"
+

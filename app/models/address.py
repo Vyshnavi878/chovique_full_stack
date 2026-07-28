@@ -21,4 +21,4 @@ class CustomerAddress(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    user = relationship("User", backref="addresses")
+    user = relationship("User", back_populates="addresses")
