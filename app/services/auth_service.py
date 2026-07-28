@@ -327,17 +327,11 @@ class AuthService:
 
         logger.info("Google login attempt")
 
-        # Verify Google token
+        # Verify Google token — raises ValueError on failure
 
         google_user = await self.google_service.verify_google_token(
             id_token
         )
-
-
-        if not google_user:
-            raise ValueError(
-                "Invalid Google token."
-            )
 
 
         # Find user

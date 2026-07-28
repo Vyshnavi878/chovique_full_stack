@@ -44,7 +44,7 @@ from app.models.offline_sale import OfflineSale  # noqa: F401
 
 engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=settings.DEBUG,
+    echo=settings.DB_ECHO,
     future=True,
     pool_pre_ping=True,
 )

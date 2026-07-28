@@ -13,6 +13,12 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next):
+        # Always pass OPTIONS preflight requests straight through so that
+        # CORSMiddleware (which is the outer layer) can respond with the
+        # correct Access-Control-Allow-Origin headers unobstructed.
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         response = await call_next(request)
 
         # Record admin & write operations

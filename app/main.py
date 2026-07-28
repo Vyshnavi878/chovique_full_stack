@@ -27,6 +27,9 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
+if not getattr(settings, "DB_ECHO", False):
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 
@@ -69,16 +72,19 @@ from app.middleware.audit import AuditLogMiddleware
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# NOTE: Middleware runs in REVERSE order of registration.
+# CORS must be added LAST so it executes FIRST (outermost layer),
+# ensuring preflight OPTIONS and all error responses include CORS headers.
 app.add_middleware(AuditLogMiddleware)
 
-if settings.ALLOWED_ORIGINS:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.ALLOWED_ORIGINS,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
 
 app.include_router(api_router)
 

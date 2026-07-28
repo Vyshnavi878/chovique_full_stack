@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     # PostgreSQL
     # =====================================================
     DATABASE_URL: str
+    DB_ECHO: bool = False
 
     # =====================================================
     # Redis
