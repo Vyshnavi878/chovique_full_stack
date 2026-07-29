@@ -537,14 +537,9 @@ class AuthService:
         email: str,
     ):
 
-        logger.info("Resend registration OTP request for email=%s", email)
-
         existing_user = await self.user_repo.get_by_email(email)
 
-        if not existing_user:
-            raise ValueError("Registration not found.")
-
-        if existing_user.is_email_verified:
+        if existing_user and existing_user.is_email_verified:
             raise ValueError("Email already registered.")
 
         can_resend = await self.otp_service.can_resend(

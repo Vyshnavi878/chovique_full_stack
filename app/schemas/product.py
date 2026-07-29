@@ -52,6 +52,9 @@ class ProductResponse(BaseModel):
     hoverImage: Optional[str] = None
     rating: float = 0.0
     ratingsCount: int = 0
+    isFeatured: bool = False
+    isBestseller: bool = False
+    isNewArrival: bool = False
     reviews: list[ReviewResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
@@ -78,7 +81,6 @@ class ProductResponse(BaseModel):
                 for r in product.__dict__["reviews_list"]
             ]
 
-
         return cls(
             id=product.id,
             name=product.name,
@@ -96,6 +98,9 @@ class ProductResponse(BaseModel):
             hoverImage=product.hover_image,
             rating=product.rating,
             ratingsCount=product.ratings_count,
+            isFeatured=getattr(product, "is_featured", False),
+            isBestseller=getattr(product, "is_bestseller", False),
+            isNewArrival=getattr(product, "is_new_arrival", False),
             reviews=reviews,
         )
 
@@ -120,6 +125,9 @@ class ProductCreate(BaseModel):
     rating: float = 0.0
     ratings_count: int = 0
     sort_order: int = 0
+    is_featured: bool = False
+    is_bestseller: bool = False
+    is_new_arrival: bool = False
 
 
 
@@ -144,6 +152,9 @@ class ProductUpdate(BaseModel):
     ratings_count: Optional[int] = None
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
+    is_featured: Optional[bool] = None
+    is_bestseller: Optional[bool] = None
+    is_new_arrival: Optional[bool] = None
 
 
 

@@ -23,7 +23,20 @@ class ReelRepository:
         await self.db.refresh(reel)
         return reel
 
+    async def get_by_id(self, reel_id: str) -> InstagramReel | None:
+        result = await self.db.execute(
+            select(InstagramReel).where(InstagramReel.id == reel_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def delete(self, reel_id: str) -> None:
+        reel = await self.get_by_id(reel_id)
+        if reel:
+            await self.db.delete(reel)
+            await self.db.commit()
+
     async def count(self) -> int:
         from sqlalchemy import func
         result = await self.db.execute(select(func.count()).select_from(InstagramReel))
         return result.scalar() or 0
+

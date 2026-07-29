@@ -141,7 +141,10 @@ class ProductRepository:
             select(Product)
             .where(
                 Product.is_active.is_(True),
-                Product.badge.in_(["Bestseller", "Premium"]),
+                or_(
+                    Product.badge.in_(["Bestseller", "Premium"]),
+                    Product.is_bestseller.is_(True),
+                ),
             )
             .order_by(Product.rating.desc())
             .limit(limit)
@@ -159,7 +162,10 @@ class ProductRepository:
             select(Product)
             .where(
                 Product.is_active.is_(True),
-                Product.badge.in_(["New", "Limited"]),
+                or_(
+                    Product.badge.in_(["New", "Limited"]),
+                    Product.is_new_arrival.is_(True),
+                ),
             )
             .order_by(Product.created_at.desc())
             .limit(limit)

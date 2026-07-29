@@ -36,9 +36,9 @@ class TestCustomerProfileAndAddress:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["phone"] == "+91 99999 88888"
-        assert data["gender"] == "male"
-        assert data["address_city"] == "Mumbai"
+        assert data["profile"]["phone"] == "+91 99999 88888"
+        assert data["profile"]["gender"] == "male"
+        assert data["profile"]["address"]["city"] == "Mumbai"
 
     async def test_add_and_list_address(self, authenticated_client: AsyncClient):
         # Add address

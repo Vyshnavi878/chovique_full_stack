@@ -36,6 +36,28 @@ class BannerRepository:
         return banner
 
     # ==========================================================
+    # Get By ID
+    # ==========================================================
+
+    async def get_by_id(self, banner_id: str) -> Banner | None:
+        result = await self.db.execute(
+            select(Banner).where(Banner.id == banner_id)
+        )
+        return result.scalar_one_or_none()
+
+    # ==========================================================
+    # Delete
+    # ==========================================================
+
+    async def delete(self, banner_id: str) -> bool:
+        banner = await self.get_by_id(banner_id)
+        if not banner:
+            return False
+        await self.db.delete(banner)
+        await self.db.commit()
+        return True
+
+    # ==========================================================
     # Count
     # ==========================================================
 
@@ -48,3 +70,4 @@ class BannerRepository:
         )
 
         return result.scalar() or 0
+

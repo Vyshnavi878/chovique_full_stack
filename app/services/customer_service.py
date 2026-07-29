@@ -25,6 +25,7 @@ from app.schemas.order import OrderPayload, OrderResponse, CartItemResponse, Shi
 from app.schemas.product import ProductResponse, ReviewResponse
 from app.schemas.ticket import CreateTicketPayload, SupportTicketResponse, TicketFeedbackPayload
 from app.schemas.user import (
+    AddressSchema,
     AvatarUploadResponse,
     CustomerAddressCreate,
     CustomerAddressResponse,
@@ -77,17 +78,53 @@ class CustomerService:
             except Exception:
                 pass
 
-        if payload.address_street is not None:
-            update_dict["address_street"] = payload.address_street
-        if payload.address_city is not None:
-            update_dict["address_city"] = payload.address_city
-        if payload.address_state is not None:
-            update_dict["address_state"] = payload.address_state
-        if payload.address_zip is not None:
-            update_dict["address_zip"] = payload.address_zip
+        has_address_update = any(
+            x is not None for x in [
+                payload.address_street,
+                payload.address_city,
+                payload.address_state,
+                payload.address_zip
+            ]
+        )
+        if has_address_update:
+            address_repo = AddressRepository(self.db)
+            addresses = await address_repo.get_user_addresses(user_id)
+            default_addr = next((a for a in addresses if a.is_default), addresses[0] if addresses else None)
+            if default_addr:
+                if payload.address_street is not None:
+                    default_addr.street = payload.address_street
+                if payload.address_city is not None:
+                    default_addr.city = payload.address_city
+                if payload.address_state is not None:
+                    default_addr.state = payload.address_state
+                if payload.address_zip is not None:
+                    default_addr.zip = payload.address_zip
+                await self.db.commit()
+            else:
+                await address_repo.create(
+                    user_id=user_id,
+                    title="Home",
+                    name=update_dict.get("full_name") or user.full_name or "Customer",
+                    phone=payload.phone or user.phone or "",
+                    street=payload.address_street or "",
+                    city=payload.address_city or "",
+                    state=payload.address_state or "",
+                    zip=payload.address_zip or "",
+                    is_default=True,
+                )
 
         user = await self.user_repo.update_profile(user_id, **update_dict)
-        return UserResponse.from_orm_user(user)
+        res = UserResponse.from_orm_user(user)
+        addresses = await address_repo.get_user_addresses(user_id)
+        default_addr = next((a for a in addresses if a.is_default), None)
+        if default_addr:
+            res.profile.address = AddressSchema(
+                street=default_addr.street,
+                city=default_addr.city,
+                state=default_addr.state,
+                zip=default_addr.zip,
+            )
+        return res
 
     async def upload_avatar(
         self,

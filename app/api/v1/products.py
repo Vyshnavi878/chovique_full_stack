@@ -1,10 +1,14 @@
-from typing import Optional
+import logging
+from typing import List, Optional
 
 from fastapi import (
     APIRouter,
     Depends,
+    File,
+    Form,
     HTTPException,
     Query,
+    UploadFile,
     status,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,12 +17,19 @@ from app.api.deps import get_current_user, require_role
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.product import (
+    NutritionInfo,
     PaginatedProductResponse,
     ProductCreate,
     ProductResponse,
     ProductUpdate,
+    ReviewResponse,
 )
+from app.services.cloudinary_service import cloudinary_service
+from app.services.customer_service import CustomerService
 from app.services.product_service import ProductService
+from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/products", tags=["Products"])
 
@@ -87,11 +98,6 @@ async def get_product(
 # Accepts multipart/form-data matching frontend FormData
 # ======================================================
 
-import json as _json
-from fastapi import Form, UploadFile, File
-import os as _os
-import uuid as _uuid
-
 @router.post(
     "",
     response_model=ProductResponse,
@@ -102,14 +108,17 @@ async def create_product(
     name: str = Form(...),
     category: str = Form(...),
     price: float = Form(...),
+    description: Optional[str] = Form(default=None),
+    is_featured: Optional[bool] = Form(default=False),
+    is_bestseller: Optional[bool] = Form(default=False),
+    is_new_arrival: Optional[bool] = Form(default=False),
     original_price: Optional[float] = Form(default=None),
     weight: Optional[str] = Form(default=None),
     stock: Optional[int] = Form(default=10),
-    description: Optional[str] = Form(default=None),
     ingredients: Optional[str] = Form(default=None),
     badge: Optional[str] = Form(default=None),
     sort_order: int = Form(default=0),
-    # Nutrition fields as individual form fields
+    # Nutrition fields
     nutrition_calories: Optional[str] = Form(default=None),
     nutrition_total_fat: Optional[str] = Form(default=None),
     nutrition_saturated_fat: Optional[str] = Form(default=None),
@@ -117,43 +126,70 @@ async def create_product(
     nutrition_sodium: Optional[str] = Form(default=None),
     nutrition_total_carb: Optional[str] = Form(default=None),
     nutrition_protein: Optional[str] = Form(default=None),
+    # Upload files
     image: Optional[UploadFile] = File(default=None),
+    gallery_images: List[UploadFile] = File(default=[]),
     current_user: User = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
-    from app.schemas.product import NutritionInfo as _NutritionInfo
-
-    # Clean category & badge enums
+    # Clean category enum
     valid_categories = ["dark", "milk", "white", "gift", "beverage"]
     clean_cat = category.lower().strip() if (category and category.lower().strip() in valid_categories) else "dark"
 
-    valid_badges = ["Bestseller", "New", "Premium", "Limited"]
-    clean_badge = badge if (badge and badge in valid_badges) else None
+    # Set badge if flags provided, and sync boolean flags with badge
+    clean_badge = badge
+    if is_bestseller:
+        clean_badge = "Bestseller"
+    elif is_new_arrival:
+        clean_badge = "New"
 
-    from app.integrations.cloudinary import cloudinary_service
+    valid_badges = ["Bestseller", "New", "Premium", "Limited", "Gift Hamper", "Gift Hampers", "Signature"]
+    if clean_badge and clean_badge not in valid_badges:
+        clean_badge = None
 
-    # Handle image upload
+    if clean_badge == "Bestseller":
+        is_bestseller = True
+    elif clean_badge == "New":
+        is_new_arrival = True
+    elif clean_badge in ("Premium", "Signature", "Gift Hamper", "Gift Hampers"):
+        is_featured = True
+
+
+
+    # Upload main image to Cloudinary folder "chocolate-world/products"
     image_url: Optional[str] = None
     if image and hasattr(image, "filename") and image.filename:
-        try:
-            content = await image.read()
-            if content:
-                image_url = await cloudinary_service.upload_image(
-                    file_bytes=content,
-                    filename=image.filename,
-                    folder="products",
-                )
-        except Exception as err:
-            logger.warning("Failed to upload product image file: %s", err)
+        image_url = await cloudinary_service.upload_image(
+            file=image,
+            folder="chocolate-world/products",
+        )
 
-
+    # Fallback placeholder image if none provided
     if not image_url:
         image_url = "https://images.unsplash.com/photo-1548907040-4d42b52115ca?auto=format&fit=crop&w=600&q=80"
+
+    # Upload gallery images if provided
+    hover_image_url: Optional[str] = None
+    gallery_urls: List[str] = []
+    if gallery_images:
+        g_files = gallery_images if isinstance(gallery_images, list) else [gallery_images]
+        for g_file in g_files:
+            if g_file and hasattr(g_file, "filename") and g_file.filename:
+                g_url = await cloudinary_service.upload_image(
+                    file=g_file,
+                    folder="chocolate-world/products",
+                )
+                gallery_urls.append(g_url)
+
+    if gallery_urls:
+        hover_image_url = gallery_urls[0]
+    else:
+        hover_image_url = image_url
 
     nutrition = None
     if any([nutrition_calories, nutrition_total_fat, nutrition_saturated_fat,
             nutrition_cholesterol, nutrition_sodium, nutrition_total_carb, nutrition_protein]):
-        nutrition = _NutritionInfo(
+        nutrition = NutritionInfo(
             calories=nutrition_calories or "",
             totalFat=nutrition_total_fat or "",
             saturatedFat=nutrition_saturated_fat or "",
@@ -175,12 +211,15 @@ async def create_product(
         nutrition=nutrition,
         badge=clean_badge,
         image=image_url,
+        hover_image=hover_image_url,
         sort_order=sort_order,
+        is_featured=is_featured or False,
+        is_bestseller=is_bestseller or False,
+        is_new_arrival=is_new_arrival or False,
     )
 
     service = ProductService(db)
     return await service.create_product(data)
-
 
 
 # ======================================================
@@ -237,10 +276,6 @@ async def delete_product(
 # ======================================================
 # PRODUCT REVIEWS (Public / Customer)
 # ======================================================
-
-from app.schemas.product import ReviewResponse
-from app.services.customer_service import CustomerService
-from pydantic import BaseModel, Field
 
 class CreateReviewRequest(BaseModel):
     author: str

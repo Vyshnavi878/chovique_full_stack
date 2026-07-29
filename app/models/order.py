@@ -7,7 +7,7 @@ from app.db.base import Base
 
 
 def generate_order_id():
-    return f"ORD-{random.randint(1000, 9999)}"
+    return f"ORD-{random.randint(10000, 99999)}-{str(uuid.uuid4())[:4].upper()}"
 
 
 class Order(Base):

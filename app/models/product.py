@@ -57,12 +57,11 @@ class Product(Base):
     # Display
     # ==========================
     badge = Column(
-        Enum(
-            "Bestseller", "New", "Premium", "Limited",
-            name="product_badge",
-        ),
+        String(50),
         nullable=True,
     )
+
+
     image = Column(Text, nullable=True)
     hover_image = Column(Text, nullable=True)
 
@@ -73,9 +72,12 @@ class Product(Base):
     ratings_count = Column(Integer, default=0, nullable=False)
 
     # ==========================
-    # Management
+    # Management & Flags
     # ==========================
     is_active = Column(Boolean, default=True, nullable=False)
+    is_featured = Column(Boolean, default=False, nullable=False)
+    is_bestseller = Column(Boolean, default=False, nullable=False)
+    is_new_arrival = Column(Boolean, default=False, nullable=False)
     sort_order = Column(Integer, default=0, nullable=False)
 
     # ==========================

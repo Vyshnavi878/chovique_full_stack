@@ -119,6 +119,9 @@ class ProductService:
             rating=data.rating,
             ratings_count=data.ratings_count,
             sort_order=data.sort_order,
+            is_featured=data.is_featured,
+            is_bestseller=data.is_bestseller,
+            is_new_arrival=data.is_new_arrival,
         )
 
         logger.info("Product created: id=%s name=%s", product.id, product.name)

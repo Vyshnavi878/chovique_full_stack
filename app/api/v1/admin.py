@@ -1,6 +1,7 @@
 import logging
+from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_role
@@ -8,13 +9,21 @@ from app.models.user import User
 from app.schemas.admin import (
     BannerImageResponse,
     CreateAdminRequest,
+    CreateBannerRequest,
+    CreateReelRequest,
+    CreateTestimonialRequest,
     DashboardStatsResponse,
     ImportSalesResponse,
     OfflineSalePayload,
     OfflineSaleResponse,
+    ReelResponse,
     ResolveTicketPayload,
+    SetContactRequest,
+    SetStatsRequest,
+    UpdateAdminPasswordPayload,
     UpdateOrderStatusPayload,
 )
+from app.schemas.home import BannerResponse, ContactInfoResponse, StatsResponse, TestimonialResponse
 from app.schemas.order import OrderResponse
 from app.schemas.ticket import SupportTicketResponse
 from app.schemas.user import SystemUserResponse
@@ -129,6 +138,23 @@ async def delete_user(
     return None
 
 
+@router.patch(
+    "/users/{user_id}/password",
+    summary="Update an administrator password (superadmin only)",
+)
+async def update_admin_password(
+    user_id: str,
+    payload: UpdateAdminPasswordPayload,
+    current_user: User = Depends(require_role("superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    success = await service.update_admin_password(user_id, payload.password, superadmin_id=current_user.id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Administrator user not found.")
+    return {"message": "Administrator password updated successfully."}
+
+
 # ======================================================
 # SUPPORT TICKETS (admin — all tickets site-wide)
 # ======================================================
@@ -226,7 +252,245 @@ async def upload_banner_image(
     current_user: User = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
-    content = await image.read()
     service = AdminService(db)
-    image_url = await service.upload_banner_image(banner_id, content, image.filename or "banner.jpg")
+    image_url = await service.upload_banner_image(banner_id, image_file=image)
     return BannerImageResponse(image_url=image_url)
+
+
+# ======================================================
+# CMS — BANNERS
+# ======================================================
+
+@router.post(
+    "/banners",
+    response_model=BannerResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new banner (admin only)",
+)
+async def create_banner(
+    title: str = Form(...),
+    subtitle: Optional[str] = Form(default=None),
+    tag: Optional[str] = Form(default=None),
+    button_text: Optional[str] = Form(default=None),
+    link: Optional[str] = Form(default=None),
+    sort_order: int = Form(default=0),
+    is_active: bool = Form(default=True),
+    image: UploadFile = File(default=None),
+    image_url: Optional[str] = Form(default=None),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    payload = CreateBannerRequest(
+        title=title,
+        subtitle=subtitle,
+        tag=tag,
+        image=image_url,
+        button_text=button_text,
+        link=link,
+        sort_order=sort_order,
+        is_active=is_active,
+    )
+    service = AdminService(db)
+    return await service.create_banner(payload, image_file=image)
+
+
+@router.delete(
+    "/banners/{banner_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a banner (superadmin only)",
+)
+async def delete_banner(
+    banner_id: str,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    success = await service.delete_banner(banner_id, superadmin_id=current_user.id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Banner not found.")
+    return None
+
+
+# ======================================================
+# CMS — TESTIMONIALS
+# ======================================================
+
+@router.post(
+    "/testimonials",
+    response_model=TestimonialResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new testimonial (admin only)",
+)
+async def create_testimonial(
+    author: str = Form(...),
+    title: Optional[str] = Form(default=None),
+    text: str = Form(...),
+    rating: float = Form(default=5.0),
+    initials: Optional[str] = Form(default=None),
+    avatar_url: Optional[str] = Form(default=None),
+    is_active: bool = Form(default=True),
+    sort_order: int = Form(default=0),
+    avatar: UploadFile = File(default=None),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    payload = CreateTestimonialRequest(
+        author=author,
+        title=title,
+        text=text,
+        rating=rating,
+        initials=initials,
+        avatar_url=avatar_url,
+        is_active=is_active,
+        sort_order=sort_order,
+    )
+    service = AdminService(db)
+    return await service.create_testimonial(payload, avatar_file=avatar)
+
+
+# ======================================================
+# CMS — INSTAGRAM REELS
+# ======================================================
+
+@router.post(
+    "/reels",
+    response_model=ReelResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new Instagram reel entry (admin only)",
+)
+async def create_reel(
+    title: str = Form(...),
+    likes: str = Form(default="0"),
+    comments: str = Form(default="0"),
+    views: str = Form(default="0 views"),
+    sort_order: int = Form(default=0),
+    is_active: bool = Form(default=True),
+    video_url: Optional[str] = Form(default=None),
+    video: UploadFile = File(default=None),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    payload = CreateReelRequest(
+        video_url=video_url,
+        likes=likes,
+        comments=comments,
+        views=views,
+        title=title,
+        sort_order=sort_order,
+        is_active=is_active,
+    )
+    service = AdminService(db)
+    return await service.create_reel(payload, video_file=video)
+
+
+@router.delete(
+    "/reels/{reel_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete an Instagram reel (admin only)",
+)
+async def delete_reel(
+    reel_id: str,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    success = await service.delete_reel(reel_id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reel not found.")
+    return None
+
+
+# ======================================================
+# CMS — TESTIMONIALS
+# ======================================================
+
+@router.post(
+    "/testimonials",
+    response_model=TestimonialResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new customer testimonial (admin only)",
+)
+async def create_testimonial(
+    author: str = Form(...),
+    title: str = Form(...),
+    text: str = Form(...),
+    rating: float = Form(default=5.0),
+    initials: Optional[str] = Form(default=None),
+    avatar_url: Optional[str] = Form(default=None),
+    avatar: UploadFile = File(default=None),
+    sort_order: int = Form(default=0),
+    is_active: bool = Form(default=True),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    payload = CreateTestimonialRequest(
+        author=author,
+        title=title,
+        text=text,
+        rating=rating,
+        initials=initials or author[:2].upper(),
+        avatar_url=avatar_url,
+        sort_order=sort_order,
+        is_active=is_active,
+    )
+    service = AdminService(db)
+    return await service.create_testimonial(payload, avatar_file=avatar)
+
+
+@router.delete(
+    "/testimonials/{testimonial_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a customer testimonial (admin only)",
+)
+async def delete_testimonial(
+    testimonial_id: str,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    success = await service.delete_testimonial(testimonial_id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Testimonial not found.")
+    return None
+
+
+# ======================================================
+# CMS — SITE CONFIG (STATS / CONTACT)
+# ======================================================
+
+@router.put(
+    "/config/stats",
+    response_model=StatsResponse,
+    summary="Set home page site stats (admin only)",
+)
+@router.patch(
+    "/config/stats",
+    response_model=StatsResponse,
+    summary="Set home page site stats (admin only)",
+)
+async def set_stats(
+    payload: SetStatsRequest,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    return await service.set_stats(payload)
+
+
+@router.put(
+    "/config/contact",
+    response_model=ContactInfoResponse,
+    summary="Set home page contact info (admin only)",
+)
+@router.patch(
+    "/config/contact",
+    response_model=ContactInfoResponse,
+    summary="Set home page contact info (admin only)",
+)
+async def set_contact(
+    payload: SetContactRequest,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    return await service.set_contact(payload)

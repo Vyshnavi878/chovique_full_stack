@@ -35,6 +35,18 @@ class TestimonialRepository:
         await self.db.refresh(testimonial)
         return testimonial
 
+    async def get_by_id(self, testimonial_id: str) -> Testimonial | None:
+        result = await self.db.execute(
+            select(Testimonial).where(Testimonial.id == testimonial_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def delete(self, testimonial_id: str) -> None:
+        item = await self.get_by_id(testimonial_id)
+        if item:
+            await self.db.delete(item)
+            await self.db.commit()
+
     # ==========================================================
     # Count
     # ==========================================================
@@ -48,3 +60,4 @@ class TestimonialRepository:
         )
 
         return result.scalar() or 0
+
