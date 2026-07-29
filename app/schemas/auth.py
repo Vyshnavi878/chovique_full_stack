@@ -1,5 +1,7 @@
 from pydantic import BaseModel, EmailStr, Field
 
+from app.schemas.user import UserResponse
+
 
 # ==========================================================
 # Register
@@ -104,3 +106,24 @@ class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str = Field(..., min_length=8)
     confirm_password: str
+
+
+# ==========================================================
+# Response Wrappers
+# ==========================================================
+# These describe the exact JSON shape the auth endpoints return,
+# so FastAPI validates the response and Swagger shows accurate
+# request/response schemas instead of "any" objects.
+
+class OTPSentResponse(BaseModel):
+    """Response for register / resend-otp (no user object yet)."""
+    message: str
+    email: EmailStr
+    expires_in: int
+
+
+class AuthUserResponse(BaseModel):
+    """Response for endpoints that return a token pair + user profile
+    (verify-otp, login, google, set-password)."""
+    message: str
+    user: UserResponse

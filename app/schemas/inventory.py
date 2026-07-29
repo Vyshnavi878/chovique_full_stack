@@ -4,9 +4,11 @@ from pydantic import BaseModel, ConfigDict
 
 class StockUpdatePayload(BaseModel):
     product_id: str
-    change_quantity: int
+    change_quantity: Optional[int] = None
+    new_stock: Optional[int] = None
     reason: str = "restock"  # 'restock', 'sale', 'adjustment', 'return'
     notes: Optional[str] = None
+
 
 
 class InventoryLogResponse(BaseModel):

@@ -60,55 +60,36 @@ class UserResponse(BaseModel):
     # Additional status fields (optional usage on frontend)
     is_email_verified: bool = False
     is_active: bool = True
+    has_password: bool = True
 
     model_config = ConfigDict(from_attributes=True)
 
     @classmethod
-    def model_validate(cls, obj, **kwargs) -> "UserResponse":
-        """Build a frontend-compatible User from an ORM User model."""
-        if hasattr(obj, "full_name"):
-            # Compute initials for avatar fallback
-            initials = ""
-            if obj.full_name:
-                parts = obj.full_name.strip().split()
-                initials = "".join(p[0].upper() for p in parts[:2])
+    def from_orm_user(cls, user):
+        initials = ""
+        if user.full_name:
+            initials = "".join(p[0].upper() for p in user.full_name.split()[:2])
 
-            dob_str = None
-            if getattr(obj, "dob", None):
-                try:
-                    dob_str = obj.dob.strftime("%Y-%m-%d")
-                except Exception:
-                    dob_str = str(obj.dob)
-
-            profile = UserProfileSchema(
-                name=obj.full_name or "",
-                email=obj.email or "",
-                phone=obj.phone or "",
+        return cls(
+            id=str(user.id),
+            name=user.full_name,
+            email=user.email,
+            role=user.role,
+            profile=UserProfileSchema(
+                name=user.full_name,
+                email=user.email,
+                phone=user.phone or "",
                 avatar=initials,
-                avatarUrl=obj.avatar_url or None,
-                dob=dob_str,
-                gender=getattr(obj, "gender", None),
-                preferences=getattr(obj, "preferences", None),
-                address=AddressSchema(
-                    street=getattr(obj, "address_street", None) or "",
-                    city=getattr(obj, "address_city", None) or "",
-                    state=getattr(obj, "address_state", None) or "",
-                    zip=getattr(obj, "address_zip", None) or "",
-                ),
-            )
-
-            return cls(
-                id=str(obj.id),
-                name=obj.full_name or "",
-                email=obj.email or "",
-                role=obj.role,
-                profile=profile,
-                is_email_verified=getattr(obj, "is_email_verified", False),
-                is_active=getattr(obj, "is_active", True),
-            )
-
-        # Fallback: use default Pydantic logic (for dict input)
-        return super().model_validate(obj, **kwargs)
+                avatarUrl=user.avatar_url,
+                dob=user.dob.strftime("%Y-%m-%d") if user.dob else None,
+                gender=user.gender,
+                preferences=None,
+                address=AddressSchema(),
+            ),
+            is_email_verified=user.is_email_verified,
+            is_active=user.is_active,
+            has_password=bool(user.hashed_password),
+        )
 
 
 # ==========================================================

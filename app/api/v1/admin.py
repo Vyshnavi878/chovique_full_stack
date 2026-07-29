@@ -7,6 +7,7 @@ from app.api.deps import get_db, require_role
 from app.models.user import User
 from app.schemas.admin import (
     BannerImageResponse,
+    CreateAdminRequest,
     DashboardStatsResponse,
     ImportSalesResponse,
     OfflineSalePayload,
@@ -91,6 +92,41 @@ async def get_all_users(
 ):
     service = AdminService(db)
     return await service.get_all_users()
+
+
+@router.post(
+    "/users",
+    response_model=SystemUserResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new administrator user (superadmin only)",
+)
+async def create_admin(
+    payload: CreateAdminRequest,
+    current_user: User = Depends(require_role("superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = AdminService(db)
+        return await service.create_admin(payload, superadmin_id=current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.delete(
+    "/users/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete/Revoke a user (superadmin only)",
+)
+async def delete_user(
+    user_id: str,
+    current_user: User = Depends(require_role("superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    success = await service.delete_user(user_id, superadmin_id=current_user.id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    return None
 
 
 # ======================================================

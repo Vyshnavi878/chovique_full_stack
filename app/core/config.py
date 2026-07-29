@@ -106,6 +106,13 @@ class Settings(BaseSettings):
     CLOUDINARY_API_KEY: str = ""
     CLOUDINARY_API_SECRET: str = ""
 
+    # =====================================================
+    # Superadmin Credentials
+    # =====================================================
+    SUPERADMIN_EMAIL: str = "superadmin@chovique.com"
+    SUPERADMIN_PASSWORD: str = "SuperAdmin123!"
+
+
 
 @lru_cache
 def get_settings() -> Settings:

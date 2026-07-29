@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.integrations.cloudinary import cloudinary_service
 from app.models.user import User
 from app.repositories.address_repository import AddressRepository
 from app.repositories.contact_repository import ContactRepository
@@ -86,7 +87,7 @@ class CustomerService:
             update_dict["address_zip"] = payload.address_zip
 
         user = await self.user_repo.update_profile(user_id, **update_dict)
-        return UserResponse.model_validate(user)
+        return UserResponse.from_orm_user(user)
 
     async def upload_avatar(
         self,
@@ -94,16 +95,15 @@ class CustomerService:
         file: UploadFile,
     ) -> AvatarUploadResponse:
 
-        os.makedirs("static/avatars", exist_ok=True)
-        ext = file.filename.split(".")[-1] if file.filename and "." in file.filename else "jpg"
-        filename = f"{user_id}_{uuid.uuid4().hex[:8]}.{ext}"
-        filepath = os.path.join("static/avatars", filename)
-
         contents = await file.read()
-        with open(filepath, "wb") as f:
-            f.write(contents)
+        filename = file.filename or f"{user_id}.jpg"
 
-        avatar_url = f"/static/avatars/{filename}"
+        avatar_url = await cloudinary_service.upload_image(
+            file_bytes=contents,
+            filename=filename,
+            folder="avatars",
+        )
+
         await self.user_repo.update_profile(user_id, avatar_url=avatar_url)
 
         return AvatarUploadResponse(avatar_url=avatar_url)

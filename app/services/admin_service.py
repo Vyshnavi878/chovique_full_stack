@@ -19,7 +19,9 @@ from app.repositories.order_repository import OrderRepository
 from app.repositories.product_repository import ProductRepository
 from app.repositories.ticket_repository import TicketRepository
 from app.repositories.user_repository import UserRepository
+from app.core.security import hash_password
 from app.schemas.admin import (
+    CreateAdminRequest,
     DashboardStatsResponse,
     ImportSalesResponse,
     OfflineSalePayload,
@@ -144,6 +146,47 @@ class AdminService:
         users = result.scalars().all()
         return [SystemUserResponse.from_orm_user(u) for u in users]
 
+    async def create_admin(self, payload: CreateAdminRequest, superadmin_id: str) -> SystemUserResponse:
+        existing = await self.user_repo.get_by_email(payload.email)
+        if existing:
+            raise ValueError("User with this email already exists.")
+
+        hashed_pw = hash_password(payload.password)
+        new_admin = await self.user_repo.create(
+            email=payload.email,
+            hashed_password=hashed_pw,
+            full_name=payload.full_name,
+            role="admin",
+            is_email_verified=True,
+            is_active=True,
+        )
+
+        await self.audit_repo.log(
+            action="create_admin",
+            user_id=superadmin_id,
+            resource=f"user:{new_admin.id}",
+            details=f"Created administrator account: {payload.email}",
+        )
+
+        return SystemUserResponse.from_orm_user(new_admin)
+
+    async def delete_user(self, user_id: str, superadmin_id: str) -> bool:
+        user = await self.user_repo.get_by_id(user_id)
+        if not user:
+            return False
+
+        await self.db.delete(user)
+        await self.db.commit()
+
+        await self.audit_repo.log(
+            action="delete_user",
+            user_id=superadmin_id,
+            resource=f"user:{user_id}",
+            details=f"Deleted user account: {user.email}",
+        )
+
+        return True
+
     # ==========================================================
     # Support Tickets (admin)
     # ==========================================================
@@ -267,11 +310,11 @@ class AdminService:
     # ==========================================================
 
     async def upload_banner_image(self, banner_id: str, file_content: bytes, filename: str) -> str:
-        """Save banner image to static dir and return its URL."""
-        os.makedirs("static/banners", exist_ok=True)
-        ext = filename.rsplit(".", 1)[-1] if "." in filename else "jpg"
-        safe_name = f"{banner_id}_{uuid.uuid4().hex[:8]}.{ext}"
-        filepath = os.path.join("static/banners", safe_name)
-        with open(filepath, "wb") as f:
-            f.write(file_content)
-        return f"/static/banners/{safe_name}"
+        """Upload banner image to Cloudinary or save locally and return its URL."""
+        from app.integrations.cloudinary import cloudinary_service
+        return await cloudinary_service.upload_image(
+            file_bytes=file_content,
+            filename=filename,
+            folder="banners",
+        )
+

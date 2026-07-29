@@ -22,7 +22,10 @@ from app.schemas.auth import (
     ChangePasswordRequest,
     VerifyForgotPasswordOTPRequest,
     ResendForgotOTPRequest,
+    OTPSentResponse,
+    AuthUserResponse,
 )
+from app.schemas.token import MessageResponse
 from app.schemas.user import UserResponse
 from app.api.deps import get_current_user_id
 from app.core.config import settings
@@ -95,7 +98,7 @@ def set_auth_cookies( response: Response, access_token: str, refresh_token: str,
 # REGISTER
 # ======================================================
 
-@router.post("/register")
+@router.post("/register", response_model=OTPSentResponse)
 async def register( request: RegisterRequest, db: AsyncSession = Depends(get_db),):
 
     try:
@@ -113,7 +116,7 @@ async def register( request: RegisterRequest, db: AsyncSession = Depends(get_db)
 # RESEND OTP (Registration)
 # ======================================================
 
-@router.post( "/resend-otp")
+@router.post( "/resend-otp", response_model=OTPSentResponse)
 async def resend_otp(
     request: ResendOTPRequest,
     db: AsyncSession = Depends(get_db),
@@ -134,7 +137,7 @@ async def resend_otp(
 # VERIFY OTP (Registration)
 # ======================================================
 
-@router.post( "/verify-otp")
+@router.post( "/verify-otp", response_model=AuthUserResponse)
 async def verify_otp(
     request: VerifyOTPRequest,
     response: Response,
@@ -159,7 +162,7 @@ async def verify_otp(
             "message":
             result["message"],
             "user":
-            UserResponse.model_validate(result["user"]),
+            UserResponse.from_orm_user(result["user"]),
         }
     except (InvalidOTPError, OTPExpiredError, MaxAttemptsExceededError) as e:
         _handle_otp_exception(e)
@@ -174,7 +177,7 @@ async def verify_otp(
 # LOGIN
 # ======================================================
 
-@router.post("/login")
+@router.post("/login", response_model=AuthUserResponse)
 async def login(
     request: LoginRequest,
     response: Response,
@@ -195,8 +198,7 @@ async def login(
         return {
             "message":
             result["message"],
-            "user":
-            UserResponse.model_validate(result["user"]),
+            "user": UserResponse.from_orm_user(result["user"]),
         }
 
     except ValueError as e:
@@ -209,7 +211,7 @@ async def login(
 # GOOGLE LOGIN
 # ======================================================
 
-@router.post("/google")
+@router.post("/google", summary="Google OAuth login / registration", response_model=AuthUserResponse)
 async def google_login(
     request: GoogleLoginRequest,
     response: Response,
@@ -230,7 +232,7 @@ async def google_login(
             "message":
             result["message"],
             "user":
-            UserResponse.model_validate(result["user"]),
+            UserResponse.from_orm_user(result["user"]),
         }
     except ValueError as e:
         raise HTTPException(
@@ -242,7 +244,7 @@ async def google_login(
 # SET PASSWORD
 # ======================================================
 
-@router.post("/set-password")
+@router.post("/set-password", response_model=AuthUserResponse)
 async def set_password(
     request: SetPasswordRequest,
     response: Response,
@@ -266,7 +268,7 @@ async def set_password(
             "message":
             result["message"],
             "user":
-            UserResponse.model_validate(result["user"]),
+            UserResponse.from_orm_user(result["user"]),
         }
 
     except ValueError as e:
@@ -279,7 +281,7 @@ async def set_password(
 # FORGOT PASSWORD
 # ======================================================
 
-@router.post("/forgot-password")
+@router.post("/forgot-password", response_model=MessageResponse)
 async def forgot_password(
     request: ForgotPasswordRequest,
     db: AsyncSession = Depends(get_db),
@@ -300,7 +302,7 @@ async def forgot_password(
 # VERIFY FORGOT PASSWORD OTP
 # ======================================================
 
-@router.post("/forgot-password/verify")
+@router.post("/forgot-password/verify", response_model=MessageResponse)
 async def verify_forgot_password_otp(
     request: VerifyForgotPasswordOTPRequest,
     db: AsyncSession = Depends(get_db),
@@ -324,7 +326,7 @@ async def verify_forgot_password_otp(
 # RESEND FORGOT PASSWORD OTP
 # ======================================================
 
-@router.post("/resend-forgot-otp")
+@router.post("/resend-forgot-otp", response_model=MessageResponse)
 async def resend_forgot_password_otp(
     request: ResendForgotOTPRequest,
     db: AsyncSession = Depends(get_db),
@@ -345,7 +347,7 @@ async def resend_forgot_password_otp(
 # RESET PASSWORD
 # ======================================================
 
-@router.post("/reset-password")
+@router.post("/reset-password", response_model=MessageResponse)
 async def reset_password(
     request: ResetPasswordRequest,
     db: AsyncSession = Depends(get_db),
@@ -371,7 +373,7 @@ async def reset_password(
 # CHANGE PASSWORD
 # ======================================================
 
-@router.post("/change-password")
+@router.post("/change-password", response_model=MessageResponse)
 async def change_password(
     request: ChangePasswordRequest,
     user_id: str = Depends(get_current_user_id),
@@ -397,7 +399,7 @@ async def change_password(
 # REFRESH TOKEN
 # ======================================================
 
-@router.post("/refresh")
+@router.post("/refresh", response_model=MessageResponse)
 async def refresh_token(
     response: Response,
     refresh_token: str | None = Cookie(
@@ -435,7 +437,7 @@ async def refresh_token(
 # LOGOUT
 # ======================================================
 
-@router.post("/logout")
+@router.post("/logout", response_model=MessageResponse)
 async def logout(
     response: Response,
     refresh_token: str | None = Cookie(

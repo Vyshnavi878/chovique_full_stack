@@ -43,6 +43,7 @@ class ProductResponse(BaseModel):
     price: float
     originalPrice: Optional[float] = None
     weight: Optional[str] = None
+    stock: int = 100
     description: Optional[str] = None
     ingredients: Optional[str] = None
     nutrition: Optional[NutritionInfo] = None
@@ -64,7 +65,7 @@ class ProductResponse(BaseModel):
             nutrition = NutritionInfo(**product.nutrition)
 
         reviews = []
-        if hasattr(product, "reviews_list") and product.reviews_list:
+        if "reviews_list" in product.__dict__ and product.__dict__["reviews_list"]:
             reviews = [
                 ReviewResponse(
                     id=r.id,
@@ -74,8 +75,9 @@ class ProductResponse(BaseModel):
                     date=r.created_at.strftime("%Y-%m-%d") if r.created_at else "",
                     avatar=r.avatar,
                 )
-                for r in product.reviews_list
+                for r in product.__dict__["reviews_list"]
             ]
+
 
         return cls(
             id=product.id,
@@ -85,6 +87,7 @@ class ProductResponse(BaseModel):
             price=product.price,
             originalPrice=product.original_price,
             weight=product.weight,
+            stock=getattr(product, "stock", 100),
             description=product.description,
             ingredients=product.ingredients,
             nutrition=nutrition,
@@ -107,6 +110,7 @@ class ProductCreate(BaseModel):
     price: float = Field(..., gt=0)
     original_price: Optional[float] = None
     weight: Optional[str] = None
+    stock: int = 100
     description: Optional[str] = None
     ingredients: Optional[str] = None
     nutrition: Optional[NutritionInfo] = None
@@ -116,6 +120,7 @@ class ProductCreate(BaseModel):
     rating: float = 0.0
     ratings_count: int = 0
     sort_order: int = 0
+
 
 
 # ==========================================================
@@ -128,6 +133,7 @@ class ProductUpdate(BaseModel):
     price: Optional[float] = None
     original_price: Optional[float] = None
     weight: Optional[str] = None
+    stock: Optional[int] = None
     description: Optional[str] = None
     ingredients: Optional[str] = None
     nutrition: Optional[NutritionInfo] = None
@@ -138,6 +144,7 @@ class ProductUpdate(BaseModel):
     ratings_count: Optional[int] = None
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
+
 
 
 # ==========================================================

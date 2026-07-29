@@ -15,7 +15,6 @@ from app.core.exceptions import (
     OTPError,
 )
 from app.db.session import AsyncSessionLocal, init_db
-from app.db.seed_data import seed_database
 
 # ==========================================================
 # Logging Configuration
@@ -45,10 +44,6 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database tables initialized.")
 
-    # Seed data
-    async with AsyncSessionLocal() as session:
-        await seed_database(session)
-
     logger.info("Application startup complete.")
     yield
     logger.info("Application shutting down.")
@@ -77,14 +72,16 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # ensuring preflight OPTIONS and all error responses include CORS headers.
 app.add_middleware(AuditLogMiddleware)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
+if settings.ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+
 
 app.include_router(api_router)
 

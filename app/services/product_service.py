@@ -109,6 +109,7 @@ class ProductService:
             price=data.price,
             original_price=data.original_price,
             weight=data.weight,
+            stock=data.stock,
             description=data.description,
             ingredients=data.ingredients,
             nutrition=nutrition_dict,

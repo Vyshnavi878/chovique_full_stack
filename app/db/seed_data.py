@@ -394,9 +394,10 @@ SEED_FAQS = [
 
 async def seed_database(db: AsyncSession) -> None:
     """
-    Seed the database with initial data.
-    Idempotent: skips if data already exists.
+    Seeding disabled.
     """
+    logger.info("Database seeding disabled.")
+    return
     from app.repositories.coupon_repository import CouponRepository
     from app.repositories.reel_repository import ReelRepository
 
@@ -482,3 +483,23 @@ async def seed_database(db: AsyncSession) -> None:
         for data in SEED_FAQS:
             await faq_repo.create(**data)
         logger.info("FAQs seeded successfully.")
+
+    # --- Superadmin User ---
+    from app.repositories.user_repository import UserRepository
+    from app.core.security import hash_password
+    from app.core.config import settings
+
+    user_repo = UserRepository(db)
+    superadmin_user = await user_repo.get_by_email(settings.SUPERADMIN_EMAIL)
+    if not superadmin_user:
+        logger.info("Seeding initial superadmin user (%s)...", settings.SUPERADMIN_EMAIL)
+        await user_repo.create(
+            email=settings.SUPERADMIN_EMAIL,
+            hashed_password=hash_password(settings.SUPERADMIN_PASSWORD),
+            full_name="Enterprise Chief",
+            role="superadmin",
+            is_email_verified=True,
+            is_active=True,
+        )
+        logger.info("Superadmin user seeded successfully.")
+
