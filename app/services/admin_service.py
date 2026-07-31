@@ -27,18 +27,21 @@ from app.repositories.testimonial_repository import TestimonialRepository
 from app.repositories.ticket_repository import TicketRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.admin import (
+    AuditLogEntry,
     CreateAdminRequest,
     CreateBannerRequest,
     CreateReelRequest,
     CreateTestimonialRequest,
     DashboardStatsResponse,
     ImportSalesResponse,
+    MonthlyRevenue,
     OfflineSalePayload,
     OfflineSaleResponse,
     ReelResponse,
     ResolveTicketPayload,
     SetContactRequest,
     SetStatsRequest,
+    TopProduct,
     UpdateOrderStatusPayload,
 )
 from app.schemas.home import BannerResponse, ContactInfoResponse, StatsResponse, TestimonialResponse
@@ -70,13 +73,23 @@ class AdminService:
     # ==========================================================
 
     async def get_dashboard_stats(self) -> DashboardStatsResponse:
+        from datetime import datetime, timezone, timedelta
+        from calendar import month_abbr
+        from sqlalchemy import extract, case
+
+        from app.models.order import OrderItem
+        from app.models.offline_sale import OfflineSale
+
+        # --- Basic counts (existing) ---
         sales_result = await self.db.execute(select(func.sum(Order.total)))
         total_sales = sales_result.scalar() or 0.0
 
         orders_result = await self.db.execute(select(func.count()).select_from(Order))
         total_orders = orders_result.scalar() or 0
 
-        users_result = await self.db.execute(select(func.count()).select_from(User))
+        users_result = await self.db.execute(
+            select(func.count()).select_from(User).where(User.role == "customer")
+        )
         total_customers = users_result.scalar() or 0
 
         products_result = await self.db.execute(select(func.count()).select_from(Product))
@@ -87,10 +100,98 @@ class AdminService:
         )
         low_stock_products_count = low_stock_result.scalar() or 0
 
+        from app.models.ticket import SupportTicket
         tickets_result = await self.db.execute(
             select(func.count()).select_from(SupportTicket).where(SupportTicket.status == "Pending")
         )
         pending_tickets_count = tickets_result.scalar() or 0
+
+        # --- Extended KPI metrics ---
+        # Total units sold (non-cancelled orders only)
+        units_sold_result = await self.db.execute(
+            select(func.sum(OrderItem.quantity))
+            .join(Order, OrderItem.order_id == Order.id)
+            .where(Order.status != "Cancelled")
+        )
+        total_units_sold = int(units_sold_result.scalar() or 0)
+
+        # Total inventory stock
+        stock_result = await self.db.execute(select(func.sum(Product.stock)))
+        total_inventory_stock = int(stock_result.scalar() or 0)
+
+        # Online revenue (non-cancelled orders)
+        online_rev_result = await self.db.execute(
+            select(func.sum(Order.total)).where(Order.status != "Cancelled")
+        )
+        total_online_revenue = round(online_rev_result.scalar() or 0.0, 2)
+
+        # Offline revenue
+        offline_rev_result = await self.db.execute(select(func.sum(OfflineSale.total_price)))
+        total_offline_revenue = round(offline_rev_result.scalar() or 0.0, 2)
+
+        # Admin count (admin + superadmin)
+        admin_count_result = await self.db.execute(
+            select(func.count()).select_from(User).where(User.role.in_(["admin", "superadmin"]))
+        )
+        admin_count = int(admin_count_result.scalar() or 0)
+
+        # --- Monthly revenue — last 6 months ---
+        now = datetime.now(timezone.utc)
+        monthly_revenue = []
+        for i in range(5, -1, -1):  # 5 months ago → this month
+            target = now - timedelta(days=i * 30)
+            yr, mo = target.year, target.month
+            label = f"{month_abbr[mo]} {yr}"
+
+            online_mo_result = await self.db.execute(
+                select(func.sum(Order.total)).where(
+                    Order.status != "Cancelled",
+                    extract("year", Order.created_at) == yr,
+                    extract("month", Order.created_at) == mo,
+                )
+            )
+            online_mo = round(online_mo_result.scalar() or 0.0, 2)
+
+            offline_mo_result = await self.db.execute(
+                select(func.sum(OfflineSale.total_price)).where(
+                    extract("year", OfflineSale.created_at) == yr,
+                    extract("month", OfflineSale.created_at) == mo,
+                )
+            )
+            offline_mo = round(offline_mo_result.scalar() or 0.0, 2)
+
+            monthly_revenue.append(MonthlyRevenue(
+                month=label,
+                online_revenue=online_mo,
+                offline_revenue=offline_mo,
+                total=round(online_mo + offline_mo, 2),
+            ))
+
+        # --- Top 5 products by units sold ---
+        from app.schemas.admin import TopProduct
+        top_prod_result = await self.db.execute(
+            select(
+                Product.name,
+                func.coalesce(func.sum(OrderItem.quantity), 0).label("units_sold"),
+                Product.stock,
+                func.coalesce(func.sum(OrderItem.quantity * OrderItem.price), 0.0).label("revenue"),
+            )
+            .outerjoin(OrderItem, OrderItem.product_id == Product.id)
+            .outerjoin(Order, Order.id == OrderItem.order_id)
+            .where(Order.status.in_(["Processing", "Shipped", "Delivered", None]) | (Order.id == None))
+            .group_by(Product.id, Product.name, Product.stock)
+            .order_by(func.coalesce(func.sum(OrderItem.quantity), 0).desc())
+            .limit(5)
+        )
+        top_products = [
+            TopProduct(
+                name=row.name,
+                units_sold=int(row.units_sold),
+                stock=int(row.stock),
+                revenue=round(float(row.revenue), 2),
+            )
+            for row in top_prod_result.all()
+        ]
 
         return DashboardStatsResponse(
             total_sales=round(total_sales, 2),
@@ -99,7 +200,39 @@ class AdminService:
             total_products=total_products,
             low_stock_products_count=low_stock_products_count,
             pending_tickets_count=pending_tickets_count,
+            total_units_sold=total_units_sold,
+            total_inventory_stock=total_inventory_stock,
+            total_online_revenue=total_online_revenue,
+            total_offline_revenue=total_offline_revenue,
+            admin_count=admin_count,
+            monthly_revenue=monthly_revenue,
+            top_products=top_products,
         )
+
+    async def get_audit_logs(self, limit: int = 50) -> list:
+        """Return the most recent audit log entries with user details."""
+        from app.models.audit_log import AuditLog
+        from app.schemas.admin import AuditLogEntry
+
+        result = await self.db.execute(
+            select(AuditLog, User.full_name, User.email)
+            .outerjoin(User, AuditLog.user_id == User.id)
+            .order_by(AuditLog.created_at.desc())
+            .limit(limit)
+        )
+        rows = result.all()
+        entries = []
+        for log, full_name, email in rows:
+            entries.append(AuditLogEntry(
+                id=log.id,
+                action=log.action,
+                user_name=full_name,
+                user_email=email,
+                resource=log.resource,
+                details=log.details,
+                created_at=log.created_at.isoformat() if log.created_at else "",
+            ))
+        return entries
 
     # ==========================================================
     # Orders
@@ -226,6 +359,41 @@ class AdminService:
         )
 
         return True
+
+    async def update_admin(
+        self,
+        user_id: str,
+        payload,
+        superadmin_id: str,
+    ):
+        """Update admin full_name and/or email (superadmin only)."""
+        from app.schemas.user import SystemUserResponse
+        user = await self.user_repo.get_by_id(user_id)
+        if not user or user.role not in ("admin", "superadmin"):
+            return None
+
+        changes = []
+        if payload.full_name is not None:
+            changes.append(f"name: {user.full_name} → {payload.full_name}")
+            user.full_name = payload.full_name
+        if payload.email is not None and payload.email != user.email:
+            existing = await self.user_repo.get_by_email(payload.email)
+            if existing and existing.id != user_id:
+                raise ValueError("A user with this email already exists.")
+            changes.append(f"email: {user.email} → {payload.email}")
+            user.email = payload.email
+
+        await self.db.commit()
+        await self.db.refresh(user)
+
+        await self.audit_repo.log(
+            action="update_admin",
+            user_id=superadmin_id,
+            resource=f"user:{user_id}",
+            details=f"Updated administrator account: {', '.join(changes) if changes else 'no changes'}",
+        )
+
+        return SystemUserResponse.from_orm_user(user)
 
 
     # ==========================================================

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, require_role
 from app.models.user import User
 from app.schemas.admin import (
+    AuditLogEntry,
     BannerImageResponse,
     CreateAdminRequest,
     CreateBannerRequest,
@@ -21,6 +22,7 @@ from app.schemas.admin import (
     SetContactRequest,
     SetStatsRequest,
     UpdateAdminPasswordPayload,
+    UpdateAdminRequest,
     UpdateOrderStatusPayload,
 )
 from app.schemas.home import BannerResponse, ContactInfoResponse, StatsResponse, TestimonialResponse
@@ -37,6 +39,20 @@ router = APIRouter(prefix="/admin", tags=["Admin Module"])
 # ======================================================
 # DASHBOARD STATS
 # ======================================================
+
+@router.get(
+    "/audit-logs",
+    response_model=list[AuditLogEntry],
+    summary="Get recent audit log entries (superadmin only)",
+)
+async def get_audit_logs(
+    limit: int = 50,
+    current_user: User = Depends(require_role("superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    return await service.get_audit_logs(limit=limit)
+
 
 @router.get(
     "/stats",
@@ -136,6 +152,27 @@ async def delete_user(
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
     return None
+
+
+@router.patch(
+    "/users/{user_id}",
+    response_model=SystemUserResponse,
+    summary="Update an administrator's details (superadmin only)",
+)
+async def update_admin(
+    user_id: str,
+    payload: UpdateAdminRequest,
+    current_user: User = Depends(require_role("superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = AdminService(db)
+        updated = await service.update_admin(user_id, payload, superadmin_id=current_user.id)
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Administrator user not found.")
+        return updated
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.patch(

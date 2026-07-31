@@ -2,13 +2,47 @@ from typing import Optional
 from pydantic import BaseModel
 
 
+class MonthlyRevenue(BaseModel):
+    month: str          # e.g. "Jan 2025"
+    online_revenue: float
+    offline_revenue: float
+    total: float
+
+
+class TopProduct(BaseModel):
+    name: str
+    units_sold: int
+    stock: int
+    revenue: float
+
+
 class DashboardStatsResponse(BaseModel):
+    # Basic counts
     total_sales: float
     total_orders: int
     total_customers: int
     total_products: int
     low_stock_products_count: int
     pending_tickets_count: int
+    # Extended KPI metrics
+    total_units_sold: int
+    total_inventory_stock: int
+    total_online_revenue: float
+    total_offline_revenue: float
+    admin_count: int
+    # Chart data
+    monthly_revenue: list[MonthlyRevenue]
+    top_products: list[TopProduct]
+
+
+class AuditLogEntry(BaseModel):
+    id: str
+    action: str
+    user_name: Optional[str]
+    user_email: Optional[str]
+    resource: Optional[str]
+    details: Optional[str]
+    created_at: str  # ISO format string
 
 
 class UpdateOrderStatusPayload(BaseModel):
@@ -55,11 +89,15 @@ class CreateAdminRequest(BaseModel):
     full_name: str
     email: str
     password: str
-    scope: Optional[str] = "All Boutiques"
 
 
 class UpdateAdminPasswordPayload(BaseModel):
     password: str
+
+
+class UpdateAdminRequest(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[str] = None
 
 
 
