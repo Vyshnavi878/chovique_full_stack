@@ -312,6 +312,22 @@ class CustomerService:
             items_data=items_data,
         )
 
+        # Clean up ordered items from database Cart & Wishlist tables
+        try:
+            from app.repositories.cart_repository import CartRepository
+            from app.repositories.wishlist_repository import WishlistRepository
+
+            cart_repo = CartRepository(self.db)
+            wishlist_repo = WishlistRepository(self.db)
+            user_cart = await cart_repo.get_or_create_user_cart(user_id)
+
+            for item_data in items_data:
+                pid = item_data["product_id"]
+                await cart_repo.remove_item(user_cart.id, pid)
+                await wishlist_repo.remove_item(user_id, pid)
+        except Exception as e:
+            logger.error(f"Error cleaning up cart/wishlist after order creation: {e}")
+
         return self._format_order_response(order)
 
     async def get_user_orders(self, user_id: str) -> list[OrderResponse]:
