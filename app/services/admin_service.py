@@ -650,6 +650,58 @@ class AdminService:
         return ContactInfoResponse(**payload.model_dump())
 
     # ==========================================================
+    # Contact Form Messages (Admin view & manage)
+    # ==========================================================
+
+    async def get_contact_messages(self) -> list:
+        from app.repositories.contact_repository import ContactRepository
+        repo = ContactRepository(self.db)
+        messages = await repo.get_all()
+        return [
+            {
+                "id": m.id,
+                "name": m.name,
+                "email": m.email,
+                "phone": m.phone,
+                "subject": m.subject,
+                "message": m.message,
+                "created_at": m.created_at.strftime("%Y-%m-%d %H:%M") if m.created_at else "",
+            }
+            for m in messages
+        ]
+
+    async def delete_contact_message(self, message_id: str) -> bool:
+        from app.repositories.contact_repository import ContactRepository
+        repo = ContactRepository(self.db)
+        return await repo.delete(message_id)
+
+    # ==========================================================
+    # Our Story Video Upload
+    # ==========================================================
+
+    async def upload_story_video(self, video_file: UploadFile) -> str:
+        """Upload crafting video for Our Story section."""
+        video_url = await cloudinary_service.upload_video(
+            file=video_file,
+            folder="chocolate-world/story",
+        )
+        if not video_url:
+            video_url = "https://assets.mixkit.co/videos/preview/mixkit-pouring-melted-chocolate-on-a-muffin-34289-large.mp4"
+        await self.site_config_repo.set("story_video", {"video_url": video_url})
+        return video_url
+
+    async def get_story_video(self) -> str:
+        data = await self.site_config_repo.get("story_video")
+        if data and isinstance(data, dict) and "video_url" in data:
+            return data["video_url"]
+        return "https://assets.mixkit.co/videos/preview/mixkit-pouring-melted-chocolate-on-a-muffin-34289-large.mp4"
+
+    async def delete_story_video(self) -> str:
+        default_video = "https://assets.mixkit.co/videos/preview/mixkit-pouring-melted-chocolate-on-a-muffin-34289-large.mp4"
+        await self.site_config_repo.set("story_video", {"video_url": default_video})
+        return default_video
+
+    # ==========================================================
     # Banner Image Upload
     # ==========================================================
 
@@ -746,3 +798,138 @@ async def ensure_default_testimonials_exist(db: AsyncSession) -> None:
     for d in defaults:
         await testimonial_repo.create(**d)
     logger.info("Default customer testimonials seeded successfully.")
+
+
+async def ensure_default_products_exist(db: AsyncSession) -> None:
+    """Ensure initial luxury chocolate products exist in the database on startup."""
+    product_repo = ProductRepository(db)
+    count = await product_repo.count()
+    if count > 0:
+        return
+
+    defaults = [
+        {
+            "name": "Belgian Dark Truffle Bar",
+            "slug": "belgian-dark-truffle-bar",
+            "category": "dark",
+            "price": 849.0,
+            "original_price": 999.0,
+            "weight": "100g",
+            "stock": 25,
+            "description": "70% Single-origin Ghanaian cocoa infused with French velvet truffle ganache and cocoa nibs.",
+            "ingredients": "Ghanaian Cocoa Mass, Cocoa Butter, Organic Cane Sugar, Natural Vanilla Bean Extract.",
+            "badge": "Bestseller",
+            "image": "https://images.unsplash.com/photo-1548907040-4d42b52115ca?auto=format&fit=crop&w=600&q=80",
+            "hover_image": "https://images.unsplash.com/photo-1549007994-cb92caebd54b?auto=format&fit=crop&w=600&q=80",
+            "rating": 4.9,
+            "ratings_count": 128,
+            "sort_order": 1,
+            "is_featured": True,
+            "is_bestseller": True,
+            "is_new_arrival": False,
+        },
+        {
+            "name": "Royal Gold Truffle Box",
+            "slug": "royal-gold-truffle-box",
+            "category": "gift",
+            "price": 2499.0,
+            "original_price": 2999.0,
+            "weight": "400g",
+            "stock": 15,
+            "description": "An opulent assortment of 16 handcrafted truffles dusted with 24K edible gold leaf in a mahogany keepsake box.",
+            "ingredients": "Ecuadorian Cacao, Alpine Cream, 24K Edible Gold Dust, Hazelnut Praline.",
+            "badge": "Gift Hamper",
+            "image": "https://images.unsplash.com/photo-1511381939415-e44015466834?auto=format&fit=crop&w=600&q=80",
+            "hover_image": "https://images.unsplash.com/photo-1582176647444-3e91129b018b?auto=format&fit=crop&w=600&q=80",
+            "rating": 5.0,
+            "ratings_count": 94,
+            "sort_order": 2,
+            "is_featured": True,
+            "is_bestseller": True,
+            "is_new_arrival": False,
+        },
+        {
+            "name": "Salted Caramel Milk Bar",
+            "slug": "salted-caramel-milk-bar",
+            "category": "milk",
+            "price": 699.0,
+            "original_price": 799.0,
+            "weight": "120g",
+            "stock": 30,
+            "description": "Creamy 45% Swiss milk chocolate layered with slow-cooked golden caramel and pink Himalayan sea salt.",
+            "ingredients": "Whole Milk Powder, Cocoa Butter, Organic Cane Sugar, Fleur de Sel, Caramel.",
+            "badge": "New",
+            "image": "https://images.unsplash.com/photo-1549007994-cb92caebd54b?auto=format&fit=crop&w=600&q=80",
+            "hover_image": "https://images.unsplash.com/photo-1548907040-4d42b52115ca?auto=format&fit=crop&w=600&q=80",
+            "rating": 4.8,
+            "ratings_count": 67,
+            "sort_order": 3,
+            "is_featured": False,
+            "is_bestseller": False,
+            "is_new_arrival": True,
+        },
+        {
+            "name": "White Silk Berry Pralines",
+            "slug": "white-silk-berry-pralines",
+            "category": "white",
+            "price": 899.0,
+            "original_price": 1050.0,
+            "weight": "150g",
+            "stock": 20,
+            "description": "Velvety cocoa butter white chocolate filled with freeze-dried raspberry compote and wild strawberry liquor.",
+            "ingredients": "Cocoa Butter, Whole Milk Powder, Freeze-dried Raspberries, Wild Strawberry Essence.",
+            "badge": "Signature",
+            "image": "https://images.unsplash.com/photo-1582176647444-3e91129b018b?auto=format&fit=crop&w=600&q=80",
+            "hover_image": "https://images.unsplash.com/photo-1511381939415-e44015466834?auto=format&fit=crop&w=600&q=80",
+            "rating": 4.7,
+            "ratings_count": 45,
+            "sort_order": 4,
+            "is_featured": True,
+            "is_bestseller": False,
+            "is_new_arrival": False,
+        },
+        {
+            "name": "Ecuadorian Dark 85% Bar",
+            "slug": "ecuadorian-dark-85-bar",
+            "category": "dark",
+            "price": 799.0,
+            "original_price": 899.0,
+            "weight": "100g",
+            "stock": 18,
+            "description": "Intense 85% single-estate dark chocolate featuring earthy floral notes and hints of toasted espresso.",
+            "ingredients": "Single-estate Ecuadorian Cocoa Liquor, Cocoa Butter, Unrefined Cane Sugar.",
+            "badge": "Premium",
+            "image": "https://images.unsplash.com/photo-1548907040-4d42b52115ca?auto=format&fit=crop&w=600&q=80",
+            "hover_image": "https://images.unsplash.com/photo-1549007994-cb92caebd54b?auto=format&fit=crop&w=600&q=80",
+            "rating": 4.9,
+            "ratings_count": 82,
+            "sort_order": 5,
+            "is_featured": True,
+            "is_bestseller": False,
+            "is_new_arrival": False,
+        },
+        {
+            "name": "Artisanal Hot Cocoa Blend",
+            "slug": "artisanal-hot-cocoa-blend",
+            "category": "beverage",
+            "price": 599.0,
+            "original_price": 699.0,
+            "weight": "250g",
+            "stock": 40,
+            "description": "Rich drinking chocolate shavings crafted from pure Venezuelan cocoa nibs and crushed bourbon vanilla bean.",
+            "ingredients": "Ground Venezuelan Cocoa, Raw Cane Sugar, Ceylon Cinnamon, Madagascar Vanilla.",
+            "badge": "Bestseller",
+            "image": "https://images.unsplash.com/photo-1511381939415-e44015466834?auto=format&fit=crop&w=600&q=80",
+            "hover_image": "https://images.unsplash.com/photo-1582176647444-3e91129b018b?auto=format&fit=crop&w=600&q=80",
+            "rating": 4.8,
+            "ratings_count": 110,
+            "sort_order": 6,
+            "is_featured": False,
+            "is_bestseller": True,
+            "is_new_arrival": False,
+        },
+    ]
+
+    for d in defaults:
+        await product_repo.create(**d)
+    logger.info("Default luxury products seeded successfully.")

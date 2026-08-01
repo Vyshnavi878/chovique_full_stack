@@ -16,7 +16,7 @@ from app.core.exceptions import (
 )
 from app.db.session import AsyncSessionLocal, init_db
 from app.services.superadmin_service import ensure_superadmin_exists
-from app.services.admin_service import ensure_default_banners_exist, ensure_default_testimonials_exist
+from app.services.admin_service import ensure_default_banners_exist, ensure_default_testimonials_exist, ensure_default_products_exist
 
 
 # ==========================================================
@@ -67,12 +67,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("PostgreSQL enum migration note: %s", e)
 
-    # Ensure superadmin, initial banners, and testimonials exist
+    # Ensure superadmin, initial banners, testimonials, and products exist
     try:
         async with AsyncSessionLocal() as db:
             await ensure_superadmin_exists(db)
             await ensure_default_banners_exist(db)
             await ensure_default_testimonials_exist(db)
+            await ensure_default_products_exist(db)
     except Exception as e:
         logger.error("Startup initialization failed: %s", e)
 

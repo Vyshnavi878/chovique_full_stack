@@ -109,3 +109,17 @@ async def get_reels(
 ):
     service = HomeService(db)
     return await service.get_reels()
+
+
+@router.get(
+    "/story-video",
+    summary="Get Our Story crafting process video URL",
+)
+async def get_story_video(
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.admin_service import AdminService
+    service = AdminService(db)
+    url = await service.get_story_video()
+    return {"video_url": url}
+

@@ -166,9 +166,11 @@ class SetStatsRequest(BaseModel):
 
 
 class SetContactRequest(BaseModel):
-    email: str
-    phone: str
-    address: str
-    instagram: str
-    facebook: str
-    twitter: str
+    email: Optional[str] = "support@chovique.com"
+    phone: Optional[str] = "+91 98765 43210"
+    whatsapp: Optional[str] = "+91 98765 43210"
+    support_hours: Optional[str] = "Mon - Sat: 10:00 AM - 8:00 PM | Sunday: 11:00 AM - 6:00 PM"
+    address: Optional[str] = "42, MG Road, Indiranagar, Bangalore, Karnataka 560038"
+    instagram: Optional[str] = "https://instagram.com"
+    facebook: Optional[str] = "https://facebook.com"
+    twitter: Optional[str] = "https://x.com"

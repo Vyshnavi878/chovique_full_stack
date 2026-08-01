@@ -163,19 +163,20 @@ class HomeService:
     # ==========================================================
 
     async def get_contact(self) -> ContactInfoResponse:
-
         contact_data = await self.config_repo.get("contact")
 
         if not contact_data or not isinstance(contact_data, dict):
             return ContactInfoResponse()
 
         return ContactInfoResponse(
-            email=contact_data.get("email", ""),
-            phone=contact_data.get("phone", ""),
-            address=contact_data.get("address", ""),
-            instagram=contact_data.get("instagram", ""),
-            facebook=contact_data.get("facebook", ""),
-            twitter=contact_data.get("twitter", ""),
+            email=contact_data.get("email", "support@chovique.com"),
+            phone=contact_data.get("phone", "+91 98765 43210"),
+            whatsapp=contact_data.get("whatsapp", "+91 98765 43210"),
+            support_hours=contact_data.get("support_hours", "Mon - Sat: 10:00 AM - 8:00 PM | Sunday: 11:00 AM - 6:00 PM"),
+            address=contact_data.get("address", "42, MG Road, Indiranagar, Bangalore, Karnataka 560038"),
+            instagram=contact_data.get("instagram", "https://instagram.com"),
+            facebook=contact_data.get("facebook", "https://facebook.com"),
+            twitter=contact_data.get("twitter", "https://x.com"),
         )
 
     async def get_reels(self):

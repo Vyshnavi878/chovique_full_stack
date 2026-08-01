@@ -54,6 +54,21 @@ class ProductRepository:
         if min_rating is not None:
             query = query.where(Product.rating >= min_rating)
 
+        if sort in ("newest", "new"):
+            query = query.where(
+                or_(
+                    Product.is_new_arrival.is_(True),
+                    Product.badge.in_(["New", "Limited"]),
+                )
+            )
+        elif sort == "bestseller":
+            query = query.where(
+                or_(
+                    Product.is_bestseller.is_(True),
+                    Product.badge.in_(["Bestseller", "Premium"]),
+                )
+            )
+
         # --- Count (before pagination) ---
 
         count_query = select(func.count()).select_from(query.subquery())

@@ -531,3 +531,68 @@ async def set_contact(
 ):
     service = AdminService(db)
     return await service.set_contact(payload)
+
+
+# ======================================================
+# CONTACT FORM MESSAGES (admin view)
+# ======================================================
+
+@router.get(
+    "/contact-messages",
+    summary="Get all submitted contact messages (admin only)",
+)
+async def get_contact_messages(
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    return await service.get_contact_messages()
+
+
+@router.delete(
+    "/contact-messages/{message_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a contact message (admin only)",
+)
+async def delete_contact_message(
+    message_id: str,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    deleted = await service.delete_contact_message(message_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found.")
+    return None
+
+
+# ======================================================
+# OUR STORY CRAFTING VIDEO UPLOAD
+# ======================================================
+
+@router.post(
+    "/story-video",
+    summary="Upload Our Story crafting video (admin only)",
+)
+async def upload_story_video(
+    video: UploadFile = File(...),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    video_url = await service.upload_story_video(video)
+    return {"video_url": video_url}
+
+
+@router.delete(
+    "/story-video",
+    summary="Delete / reset Our Story crafting video (admin only)",
+)
+async def delete_story_video(
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    video_url = await service.delete_story_video()
+    return {"video_url": video_url}
+
