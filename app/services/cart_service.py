@@ -84,3 +84,12 @@ class CartService:
         cart = await self.cart_repo.get_or_create_user_cart(user_id)
         await self.cart_repo.clear_cart(cart.id)
         return await self.get_cart(user_id)
+
+    async def sync_cart(self, user_id: str, items: list) -> CartResponseSchema:
+        cart = await self.cart_repo.get_or_create_user_cart(user_id)
+        for item in items:
+            product = await self.product_repo.get_by_id(item.product_id)
+            if product and product.is_active and product.stock >= item.quantity:
+                await self.cart_repo.add_or_update_item(cart.id, item.product_id, item.quantity)
+        
+        return await self.get_cart(user_id)

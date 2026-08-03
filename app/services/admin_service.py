@@ -235,6 +235,50 @@ class AdminService:
         return entries
 
     # ==========================================================
+    # Coupons
+    # ==========================================================
+
+    async def get_coupons(self):
+        from app.repositories.coupon_repository import CouponRepository
+        coupon_repo = CouponRepository(self.db)
+        return await coupon_repo.get_all()
+
+    async def create_coupon(self, data):
+        from app.repositories.coupon_repository import CouponRepository
+        coupon_repo = CouponRepository(self.db)
+        return await coupon_repo.create(**data.model_dump())
+        
+    async def update_coupon(self, code: str, data):
+        from app.repositories.coupon_repository import CouponRepository
+        coupon_repo = CouponRepository(self.db)
+        return await coupon_repo.update(code, **data.model_dump(exclude_unset=True))
+
+    async def get_contact_messages(self) -> list:
+        # TODO: Implement contact form submission tracking in a DB table
+        # Currently returning empty list as mock
+        return []
+
+    async def delete_contact_message(self, message_id: str) -> None:
+        pass
+
+    # ==========================================================
+    # Global Configs (Theme & Platform Settings)
+    # ==========================================================
+
+    async def get_config(self, key: str) -> dict | list | str | None:
+        return await self.site_config_repo.get(key)
+
+    async def set_config(self, key: str, value: dict | list | str) -> dict | list | str:
+        await self.site_config_repo.set(key, value)
+        return value
+
+    async def delete_coupon(self, code: str):
+        from app.repositories.coupon_repository import CouponRepository
+        coupon_repo = CouponRepository(self.db)
+        return await coupon_repo.delete(code)
+
+
+    # ==========================================================
     # Orders
     # ==========================================================
 

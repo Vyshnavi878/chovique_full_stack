@@ -20,21 +20,21 @@ from app.schemas.auth import (
     ResendOTPRequest,
     ResetPasswordRequest,
     ChangePasswordRequest,
-    VerifyForgotPasswordOTPRequest,
     ResendForgotOTPRequest,
     OTPSentResponse,
     AuthUserResponse,
 )
 from app.schemas.token import MessageResponse
 from app.schemas.user import UserResponse
-from app.api.deps import get_current_user_id
+from app.api.deps import get_current_user_id, _extract_token
+from app.middleware.rate_limit_middleware import RateLimiter
 from app.core.config import settings
 from app.core.exceptions import (
     InvalidOTPError,
     MaxAttemptsExceededError,
     OTPExpiredError,
 )
-from fastapi import Cookie
+from fastapi import Cookie, Header
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +177,7 @@ async def verify_otp(
 # LOGIN
 # ======================================================
 
-@router.post("/login", response_model=AuthUserResponse)
+@router.post("/login", response_model=AuthUserResponse, dependencies=[Depends(RateLimiter(times=5, seconds=60))])
 async def login(
     request: LoginRequest,
     response: Response,
@@ -298,29 +298,6 @@ async def forgot_password(
             detail=str(e)
         )
 
-# ======================================================
-# VERIFY FORGOT PASSWORD OTP
-# ======================================================
-
-@router.post("/forgot-password/verify", response_model=MessageResponse)
-async def verify_forgot_password_otp(
-    request: VerifyForgotPasswordOTPRequest,
-    db: AsyncSession = Depends(get_db),
-):
-
-    try:
-        service = AuthService(db)
-        return await service.verify_forgot_password_otp(
-            email=request.email,
-            otp=request.otp,
-        )
-    except (InvalidOTPError, OTPExpiredError, MaxAttemptsExceededError) as e:
-        _handle_otp_exception(e)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
 
 # ======================================================
 # RESEND FORGOT PASSWORD OTP
@@ -443,14 +420,22 @@ async def logout(
     refresh_token: str | None = Cookie(
         default=None
     ),
+    access_token: str | None = Cookie(
+        default=None
+    ),
+    authorization: str | None = Header(
+        default=None
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     try:
         service = AuthService(db)
-        if refresh_token:
-            await service.logout(
-                refresh_token
-            )
+        extracted_access_token = _extract_token(access_token, authorization)
+
+        await service.logout(
+            refresh_token=refresh_token,
+            access_token=extracted_access_token
+        )
         # Delete cookies
         response.delete_cookie(
             key="access_token"

@@ -94,6 +94,50 @@ async def get_product(
 
 
 # ======================================================
+# BULK & RECOMMENDATIONS (Public)
+# ======================================================
+
+@router.get(
+    "/bulk",
+    response_model=list[ProductResponse],
+    summary="Get multiple products by IDs (useful for recently viewed)",
+)
+async def get_products_bulk(
+    ids: str = Query(..., description="Comma-separated product IDs"),
+    db: AsyncSession = Depends(get_db),
+):
+    service = ProductService(db)
+    product_ids = [id.strip() for id in ids.split(",") if id.strip()]
+    return await service.get_products_bulk(product_ids)
+
+@router.get(
+    "/recommendations",
+    response_model=list[ProductResponse],
+    summary="Get product recommendations",
+)
+async def get_recommendations(
+    limit: int = Query(default=4, ge=1, le=12),
+    db: AsyncSession = Depends(get_db),
+    # Optional auth to personalize later
+):
+    service = ProductService(db)
+    return await service.get_recommendations(user_id=None, limit=limit)
+
+@router.get(
+    "/{product_id}/related",
+    response_model=list[ProductResponse],
+    summary="Get related products",
+)
+async def get_related_products(
+    product_id: str,
+    limit: int = Query(default=4, ge=1, le=12),
+    db: AsyncSession = Depends(get_db),
+):
+    service = ProductService(db)
+    return await service.get_related_products(product_id, limit)
+
+
+# ======================================================
 # CREATE PRODUCT (Admin only)
 # Accepts multipart/form-data matching frontend FormData
 # ======================================================

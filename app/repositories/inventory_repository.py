@@ -15,6 +15,7 @@ class InventoryRepository:
         reason: str,
         notes: str | None = None,
         performed_by: str | None = None,
+        commit: bool = True,
     ) -> InventoryLog:
         log_entry = InventoryLog(
             product_id=product_id,
@@ -24,8 +25,11 @@ class InventoryRepository:
             performed_by=performed_by,
         )
         self.db.add(log_entry)
-        await self.db.commit()
-        await self.db.refresh(log_entry)
+        if commit:
+            await self.db.commit()
+            await self.db.refresh(log_entry)
+        else:
+            await self.db.flush()
         return log_entry
 
     async def get_logs_for_product(self, product_id: str) -> list[InventoryLog]:

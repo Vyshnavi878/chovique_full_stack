@@ -70,14 +70,6 @@ class ResendOTPRequest(BaseModel):
     email: EmailStr
 
 
-# ==========================================================
-# Verify Forgot Password OTP
-# ==========================================================
-
-class VerifyForgotPasswordOTPRequest(BaseModel):
-    email: EmailStr
-    otp: str = Field(..., min_length=6, max_length=6)
-
 
 # ==========================================================
 # Resend Forgot Password OTP

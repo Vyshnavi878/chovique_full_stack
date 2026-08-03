@@ -177,3 +177,50 @@ class ProductService:
         logger.info("Product deleted: id=%s", product_id)
 
         return True
+
+    # ==========================================================
+    # Related Products & Recommendations
+    # ==========================================================
+
+    async def get_related_products(self, product_id: str, limit: int = 4) -> list[ProductResponse]:
+        product = await self.product_repo.get_by_id(product_id)
+        if not product:
+            return []
+
+        # Find products in same category, excluding the current one
+        result = await self.product_repo.get_all(category=product.category, per_page=limit + 1)
+        related = [p for p in result["items"] if str(p.id) != str(product_id)][:limit]
+        
+        return [ProductResponse.from_orm_model(p) for p in related]
+
+    async def get_recommendations(self, user_id: str | None = None, limit: int = 4) -> list[ProductResponse]:
+        # For authenticated users, we could fetch their order history and recommend based on it.
+        # But for simplicity, we'll just return bestsellers for everyone.
+        # This can be expanded later.
+        
+        # A simple recommendation: return highly rated or bestsellers
+        from sqlalchemy import select
+        from app.models.product import Product
+        
+        stmt = select(Product).filter(Product.is_active == True).order_by(Product.rating.desc()).limit(limit)
+        result = await self.db.execute(stmt)
+        products = result.scalars().all()
+        
+        return [ProductResponse.from_orm_model(p) for p in products]
+
+    async def get_products_bulk(self, product_ids: list[str]) -> list[ProductResponse]:
+        if not product_ids:
+            return []
+            
+        from sqlalchemy import select
+        from app.models.product import Product
+        
+        stmt = select(Product).filter(Product.id.in_(product_ids), Product.is_active == True)
+        result = await self.db.execute(stmt)
+        products = result.scalars().all()
+        
+        # Keep original order based on product_ids array if possible
+        products_dict = {str(p.id): p for p in products}
+        ordered_products = [products_dict[pid] for pid in product_ids if pid in products_dict]
+        
+        return [ProductResponse.from_orm_model(p) for p in ordered_products]

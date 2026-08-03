@@ -188,4 +188,15 @@ class UserRepository:
             )
             await self.db.commit()
 
-        return await self.get_by_id(user_id)
+        return await self.get_by_id(user_id)
+
+    # ==========================================================
+    # Count Customers
+    # ==========================================================
+
+    async def count_customers(self) -> int:
+        from sqlalchemy import select, func
+        result = await self.db.execute(
+            select(func.count(User.id)).where(User.role == "customer")
+        )
+        return result.scalar_one_or_none() or 0

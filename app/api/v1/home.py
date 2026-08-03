@@ -101,6 +101,18 @@ async def get_contact(
 
 
 @router.get(
+    "/theme",
+    summary="Get global theme configuration",
+)
+async def get_theme(
+    db: AsyncSession = Depends(get_db),
+):
+    service = HomeService(db)
+    theme = await service.get_theme()
+    return theme if theme else {}
+
+
+@router.get(
     "/reels",
     summary="Get active Instagram reels",
 )

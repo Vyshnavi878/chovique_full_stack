@@ -35,14 +35,17 @@ class WishlistRepository:
         await self.db.refresh(item)
         return item
 
-    async def remove_item(self, user_id: str, product_id: str) -> bool:
+    async def remove_item(self, user_id: str, product_id: str, commit: bool = True) -> bool:
         result = await self.db.execute(
             delete(WishlistItem).where(
                 WishlistItem.user_id == user_id,
                 WishlistItem.product_id == product_id,
             )
         )
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
         return result.rowcount > 0
 
     async def get_count(self, user_id: str) -> int:

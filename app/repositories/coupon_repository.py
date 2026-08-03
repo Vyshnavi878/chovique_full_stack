@@ -20,6 +20,10 @@ class CouponRepository:
         )
         return list(result.scalars().all())
 
+    async def get_all(self) -> list[Coupon]:
+        result = await self.db.execute(select(Coupon).order_by(Coupon.created_at.desc()))
+        return list(result.scalars().all())
+
     async def create(self, **kwargs) -> Coupon:
         kwargs["code"] = kwargs["code"].upper()
         coupon = Coupon(**kwargs)
@@ -27,6 +31,27 @@ class CouponRepository:
         await self.db.commit()
         await self.db.refresh(coupon)
         return coupon
+
+    async def update(self, code: str, **kwargs) -> Coupon | None:
+        coupon = await self.get_by_code(code)
+        if not coupon:
+            return None
+        
+        for key, value in kwargs.items():
+            if hasattr(coupon, key) and value is not None:
+                setattr(coupon, key, value)
+                
+        await self.db.commit()
+        await self.db.refresh(coupon)
+        return coupon
+
+    async def delete(self, code: str) -> bool:
+        coupon = await self.get_by_code(code)
+        if not coupon:
+            return False
+        await self.db.delete(coupon)
+        await self.db.commit()
+        return True
 
     async def count(self) -> int:
         from sqlalchemy import func

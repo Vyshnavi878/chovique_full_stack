@@ -24,6 +24,7 @@ class GoogleService:
                 token,
                 requests.Request(),
                 settings.GOOGLE_CLIENT_ID,
+                clock_skew_in_seconds=10,
             )
             return {
                 "google_id": user_info["sub"],
@@ -41,6 +42,7 @@ class GoogleService:
                 token,
                 requests.Request(),
                 audience=None,
+                clock_skew_in_seconds=10,
             )
             return {
                 "google_id": user_info["sub"],

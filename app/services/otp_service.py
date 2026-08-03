@@ -1,5 +1,5 @@
 import logging
-import random
+import secrets
 
 from app.core.config import settings
 from app.core.exceptions import (
@@ -25,7 +25,7 @@ class OTPService:
 
     @staticmethod
     def generate_otp() -> str:
-        return f"{random.randint(100000, 999999)}"
+        return f"{secrets.randbelow(900000) + 100000}"
 
     # ======================================================
     # Save OTP

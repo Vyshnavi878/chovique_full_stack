@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.models.user import User
-from app.schemas.cart import AddToCartPayload, CartResponseSchema, UpdateCartQuantityPayload
+from app.schemas.cart import AddToCartPayload, CartResponseSchema, UpdateCartQuantityPayload, SyncCartPayload
 from app.services.cart_service import CartService
 
 router = APIRouter(prefix="/cart", tags=["Cart"])
@@ -62,3 +62,16 @@ async def clear_cart(
 ):
     service = CartService(db)
     return await service.clear_cart(current_user.id)
+
+
+@router.post("/sync", response_model=CartResponseSchema, summary="Sync guest cart items to user cart")
+async def sync_cart(
+    payload: SyncCartPayload,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = CartService(db)
+        return await service.sync_cart(current_user.id, payload.items)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

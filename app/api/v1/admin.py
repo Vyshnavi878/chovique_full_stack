@@ -68,6 +68,169 @@ async def get_dashboard_stats(
 
 
 # ======================================================
+# COUPONS
+# ======================================================
+
+from app.schemas.coupon import CouponCreate, CouponUpdate, CouponAdminResponse
+
+@router.get(
+    "/coupons",
+    response_model=list[CouponAdminResponse],
+    summary="Get all coupons (admin only)",
+)
+async def get_all_coupons(
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    return await service.get_coupons()
+
+@router.post(
+    "/coupons",
+    response_model=CouponAdminResponse,
+    summary="Create a new coupon (admin only)",
+)
+async def create_coupon(
+    payload: CouponCreate,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    coupon = await service.create_coupon(payload)
+    if not coupon:
+        raise HTTPException(status_code=400, detail="Failed to create coupon")
+    return coupon
+
+@router.patch(
+    "/coupons/{code}",
+    response_model=CouponAdminResponse,
+    summary="Update a coupon (admin only)",
+)
+async def update_coupon(
+    code: str,
+    payload: CouponUpdate,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    coupon = await service.update_coupon(code, payload)
+    if not coupon:
+        raise HTTPException(status_code=404, detail="Coupon not found")
+    return coupon
+
+@router.delete(
+    "/coupons/{code}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a coupon (admin only)",
+)
+async def delete_coupon(
+    code: str,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    await service.delete_coupon(code)
+
+@router.delete(
+    "/products/{product_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a product (admin only)",
+)
+async def delete_product(
+    product_id: str,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import ProductService
+    service = ProductService(db)
+    await service.delete_product(product_id)
+
+
+@router.patch(
+    "/products/{product_id}/stock",
+    summary="Update product stock directly",
+)
+async def update_product_stock(
+    product_id: str,
+    payload: dict,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.product_service import ProductService
+    service = ProductService(db)
+    stock = payload.get("stock", 0)
+    
+    # We update it via the product repository
+    product = await service.product_repo.get_by_id(product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+        
+    old_stock = product.stock
+    await service.product_repo.update(product_id, stock=stock)
+    
+    # Log inventory change
+    from app.repositories.inventory_repository import InventoryRepository
+    inventory_repo = InventoryRepository(db)
+    await inventory_repo.log_change(
+        product_id=product_id,
+        change_quantity=stock - old_stock,
+        reason=f"Manual admin adjustment by {current_user.email}",
+        notes=f"Stock updated to {stock}",
+        performed_by=current_user.id
+    )
+    return {"message": "Stock updated successfully", "stock": stock}
+
+# ======================================================
+# GLOBAL CONFIG (THEME & PLATFORM SETTINGS)
+# ======================================================
+
+@router.get(
+    "/config/theme",
+    summary="Get global theme configuration",
+)
+async def get_theme_config(
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    return await service.get_config("theme")
+
+@router.patch(
+    "/config/theme",
+    summary="Update global theme configuration",
+)
+async def update_theme_config(
+    payload: dict,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    return await service.set_config("theme", payload)
+
+@router.get(
+    "/config/platform",
+    summary="Get global platform settings",
+)
+async def get_platform_config(
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    return await service.get_config("platform_settings")
+
+@router.patch(
+    "/config/platform",
+    summary="Update global platform settings",
+)
+async def update_platform_config(
+    payload: dict,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    return await service.set_config("platform_settings", payload)
+
+# ======================================================
 # ORDERS (admin — all orders site-wide)
 # ======================================================
 

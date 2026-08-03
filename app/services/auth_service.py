@@ -333,6 +333,12 @@ class AuthService:
             id_token
         )
 
+        if not google_user:
+            raise ValueError("Invalid Google token")
+
+        # Include ownership verification: The email must be verified on Google
+        if not google_user.get("email_verified"):
+            raise ValueError("Google account email must be verified.")
 
         # 1. Check if user exists by google_id first
         user = await self.user_repo.get_by_google_id(
@@ -638,31 +644,6 @@ class AuthService:
 
 
 
-    # ======================================================
-    # VERIFY FORGOT PASSWORD OTP
-    # ======================================================
-
-    async def verify_forgot_password_otp(
-        self,
-        email: str,
-        otp: str,
-    ):
-        """Verify OTP for forgot password flow (separate from reset)."""
-
-        logger.info("Verifying forgot password OTP for email=%s", email)
-
-        # Raises typed exceptions on failure
-        await self.otp_service.verify_otp(
-            email=email,
-            otp=otp,
-            purpose="forgot",
-        )
-
-        logger.info("Forgot password OTP verified for %s", email)
-
-        return {
-            "message": "OTP verified successfully.",
-        }
 
 
     # ======================================================
@@ -1055,31 +1036,35 @@ class AuthService:
     # ======================================================
 
     async def logout(
-
         self,
-
-        refresh_token: str,
-
+        refresh_token: str | None = None,
+        access_token: str | None = None,
     ):
 
 
-        payload = decode_token(
-            refresh_token
-        )
-
-
-        if payload:
-
-            jti = payload.get(
-                "jti"
+        if refresh_token:
+            payload = decode_token(
+                refresh_token
             )
-
-
-            if jti:
-
-                await self.refresh_repo.revoke(
-                    jti
+            if payload:
+                jti = payload.get(
+                    "jti"
                 )
+                if jti:
+                    await self.refresh_repo.revoke(
+                        jti
+                    )
+                    
+        if access_token:
+            payload = decode_token(access_token)
+            if payload:
+                exp = payload.get("exp")
+                if exp:
+                    now = int(datetime.now(timezone.utc).timestamp())
+                    ttl = exp - now
+                    if ttl > 0:
+                        from app.db.redis import redis_client
+                        await redis_client.setex(f"blocklist:{access_token}", ttl, "1")
 
 
 

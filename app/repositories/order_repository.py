@@ -20,6 +20,7 @@ class OrderRepository:
         delivery_option: str,
         payment_method: str,
         items_data: list[dict],
+        commit: bool = True,
     ) -> Order:
         order = Order(
             user_id=user_id,
@@ -44,7 +45,10 @@ class OrderRepository:
             )
             self.db.add(item)
 
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
 
         # Re-fetch with loaded items and product relationships
         return await self.get_by_id(order.id)

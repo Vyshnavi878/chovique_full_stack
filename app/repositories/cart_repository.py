@@ -61,16 +61,22 @@ class CartRepository:
         await self.db.commit()
         return result.rowcount > 0
 
-    async def remove_item(self, cart_id: str, product_id: str) -> bool:
+    async def remove_item(self, cart_id: str, product_id: str, commit: bool = True) -> bool:
         result = await self.db.execute(
             delete(CartItem)
             .where(CartItem.cart_id == cart_id, CartItem.product_id == product_id)
         )
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
         return result.rowcount > 0
 
-    async def clear_cart(self, cart_id: str) -> None:
+    async def clear_cart(self, cart_id: str, commit: bool = True) -> None:
         await self.db.execute(
             delete(CartItem).where(CartItem.cart_id == cart_id)
         )
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()

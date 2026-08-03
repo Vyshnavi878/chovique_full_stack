@@ -27,3 +27,12 @@ class CartResponseSchema(BaseModel):
     item_count: int = 0
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class SyncCartItem(BaseModel):
+    product_id: str
+    quantity: int
+
+
+class SyncCartPayload(BaseModel):
+    items: list[SyncCartItem]

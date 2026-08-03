@@ -55,6 +55,24 @@ async def get_current_user_id(
             detail="Invalid or expired access token.",
         )
 
+    from app.db.redis import redis_client
+    import logging
+    import redis.exceptions
+
+    is_blocked = False
+    try:
+        is_blocked = await redis_client.get(f"blocklist:{token}")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Redis connection error: {e}. Skipping token blocklist check. Is Redis running?")
+        is_blocked = False
+        
+    if is_blocked:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked.",
+        )
+
     if payload.get("type") != "access":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

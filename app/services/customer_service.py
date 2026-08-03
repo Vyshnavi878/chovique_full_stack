@@ -11,6 +11,7 @@ from app.models.user import User
 from app.repositories.address_repository import AddressRepository
 from app.repositories.contact_repository import ContactRepository
 from app.repositories.coupon_repository import CouponRepository
+from app.repositories.inventory_repository import InventoryRepository
 from app.repositories.notification_repository import NotificationRepository
 from app.repositories.order_repository import OrderRepository
 from app.repositories.product_repository import ProductRepository
@@ -44,6 +45,7 @@ class CustomerService:
         self.user_repo = UserRepository(db)
         self.address_repo = AddressRepository(db)
         self.coupon_repo = CouponRepository(db)
+        self.inventory_repo = InventoryRepository(db)
         self.order_repo = OrderRepository(db)
         self.ticket_repo = TicketRepository(db)
         self.notification_repo = NotificationRepository(db)
@@ -132,12 +134,11 @@ class CustomerService:
         file: UploadFile,
     ) -> AvatarUploadResponse:
 
-        contents = await file.read()
-        filename = file.filename or f"{user_id}.jpg"
+        if not file.filename:
+            file.filename = f"{user_id}.jpg"
 
         avatar_url = await cloudinary_service.upload_image(
-            file_bytes=contents,
-            filename=filename,
+            file=file,
             folder="avatars",
         )
 
@@ -270,65 +271,134 @@ class CustomerService:
         payload: OrderPayload,
     ) -> OrderResponse:
 
-        subtotal = 0.0
-        items_data = []
+        async with self.db.begin_nested():
+            subtotal = 0.0
+            items_data = []
 
-        for item in payload.items:
-            product = await self.product_repo.get_by_id(item.product_id)
-            if not product:
-                raise ValueError(f"Product with ID {item.product_id} not found.")
+            for item in payload.items:
+                product = await self.product_repo.get_by_id(item.product_id)
+                if not product or not product.is_active:
+                    raise ValueError(f"Product '{item.product_id}' is unavailable.")
 
-            item_price = product.price
-            subtotal += item_price * item.quantity
-            items_data.append({
-                "product_id": product.id,
-                "quantity": item.quantity,
-                "price": item_price,
+                if product.stock < item.quantity:
+                    raise ValueError(f"Insufficient stock for '{product.name}'. Only {product.stock} left.")
+
+                item_price = product.price
+                subtotal += item_price * item.quantity
+                items_data.append({
+                    "product_id": product.id,
+                    "quantity": item.quantity,
+                    "price": item_price,
+                })
+
+            discount = 0.0
+            if payload.coupon_code:
+                coupon = await self.coupon_repo.get_by_code(payload.coupon_code)
+                if coupon:
+                    if coupon.discount_percent > 0:
+                        discount = (subtotal * coupon.discount_percent) / 100.0
+                    elif coupon.discount_amount > 0:
+                        discount = coupon.discount_amount
+
+            shipping = 0.0 if subtotal > 1500 else 99.0
+            total = max(0.0, subtotal - discount + shipping)
+
+            shipping_addr_dict = payload.shipping_address.model_dump()
+
+            order = await self.order_repo.create_order(
+                user_id=user_id,
+                total=round(total, 2),
+                subtotal=round(subtotal, 2),
+                discount=round(discount, 2),
+                shipping=round(shipping, 2),
+                shipping_address=shipping_addr_dict,
+                delivery_option=payload.delivery_option,
+                payment_method=payload.payment_method,
+                items_data=items_data,
+                commit=False,
+            )
+
+            # Clean up ordered items from database Cart & Wishlist tables
+            try:
+                from app.repositories.cart_repository import CartRepository
+                from app.repositories.wishlist_repository import WishlistRepository
+                from app.integrations.resend import resend_email
+                import asyncio
+
+                cart_repo = CartRepository(self.db)
+                wishlist_repo = WishlistRepository(self.db)
+                user_cart = await cart_repo.get_or_create_user_cart(user_id)
+
+                for item_data in items_data:
+                    pid = item_data["product_id"]
+                    await cart_repo.remove_item(user_cart.id, pid, commit=False)
+                    await wishlist_repo.remove_item(user_id, pid, commit=False)
+                    
+                    # Deduct stock immediately (for Direct Checkout / Mock Payment / COD)
+                    product = await self.product_repo.get_by_id(pid)
+                    if product:
+                        new_stock = max(0, product.stock - item_data["quantity"])
+                        await self.product_repo.update(product.id, stock=new_stock, commit=False)
+                        
+                        from app.repositories.inventory_repository import InventoryRepository
+                        inventory_repo = InventoryRepository(self.db)
+                        await inventory_repo.log_change(
+                            product_id=product.id,
+                            change_quantity=-item_data["quantity"],
+                            reason=f"Customer order placed: {order.id}",
+                            notes=f"Stock updated to {new_stock}",
+                            performed_by=user_id,
+                            commit=False,
+                        )
+
+            except Exception as ex:
+                logger.error(f"Error during post-checkout cleanup: {ex}")
+                raise ex
+
+        # Send Email Confirmation immediately after transaction commits
+        try:
+            from app.integrations.resend import resend_email
+            import asyncio
+            user = await self.user_repo.get_by_id(user_id)
+            if user and user.email:
+                asyncio.create_task(
+                    resend_email.send_order_confirmation(
+                        email=user.email,
+                        name=user.full_name,
+                        order_id=order.id,
+                        total=order.total,
+                        )
+                    )
+        except Exception as e:
+            logger.error(f"Failed to trigger email for order {order.id}: {e}")
+
+        # The final commit is done automatically by `async with self.db.begin_nested():` and the router dependency
+        await self.db.commit()
+
+        # Build Response
+        order_items = []
+        for d in items_data:
+            p = await self.product_repo.get_by_id(d["product_id"])
+            order_items.append({
+                "product_id": d["product_id"],
+                "product_name": p.name if p else "Unknown",
+                "quantity": d["quantity"],
+                "price": d["price"]
             })
 
-        discount = 0.0
-        if payload.coupon_code:
-            coupon = await self.coupon_repo.get_by_code(payload.coupon_code)
-            if coupon:
-                if coupon.discount_percent > 0:
-                    discount = (subtotal * coupon.discount_percent) / 100.0
-                elif coupon.discount_amount > 0:
-                    discount = coupon.discount_amount
-
-        shipping = 0.0 if subtotal > 1500 else 99.0
-        total = max(0.0, subtotal - discount + shipping)
-
-        shipping_addr_dict = payload.shipping_address.model_dump()
-
-        order = await self.order_repo.create_order(
-            user_id=user_id,
-            total=round(total, 2),
-            subtotal=round(subtotal, 2),
-            discount=round(discount, 2),
-            shipping=round(shipping, 2),
-            shipping_address=shipping_addr_dict,
-            delivery_option=payload.delivery_option,
-            payment_method=payload.payment_method,
-            items_data=items_data,
+        return OrderResponse(
+            id=order.id,
+            user_id=order.user_id,
+            total=order.total,
+            subtotal=order.subtotal,
+            discount=order.discount,
+            shipping=order.shipping,
+            status=order.status,
+            delivery_option=order.delivery_option,
+            payment_method=order.payment_method,
+            items=order_items,
+            created_at=order.created_at,
         )
-
-        # Clean up ordered items from database Cart & Wishlist tables
-        try:
-            from app.repositories.cart_repository import CartRepository
-            from app.repositories.wishlist_repository import WishlistRepository
-
-            cart_repo = CartRepository(self.db)
-            wishlist_repo = WishlistRepository(self.db)
-            user_cart = await cart_repo.get_or_create_user_cart(user_id)
-
-            for item_data in items_data:
-                pid = item_data["product_id"]
-                await cart_repo.remove_item(user_cart.id, pid)
-                await wishlist_repo.remove_item(user_id, pid)
-        except Exception as e:
-            logger.error(f"Error cleaning up cart/wishlist after order creation: {e}")
-
-        return self._format_order_response(order)
 
     async def get_user_orders(self, user_id: str) -> list[OrderResponse]:
         orders = await self.order_repo.get_user_orders(user_id)
@@ -338,6 +408,37 @@ class CustomerService:
         order = await self.order_repo.get_by_id(order_id)
         if not order or order.user_id != user_id:
             return None
+        return self._format_order_response(order)
+
+    async def cancel_order(self, order_id: str, user_id: str) -> OrderResponse | None:
+        async with self.db.begin_nested():
+            order = await self.order_repo.get_by_id(order_id)
+            if not order or order.user_id != user_id:
+                return None
+            
+            if order.status != "Processing":
+                raise ValueError("Order cannot be cancelled in its current state.")
+
+            order.status = "Cancelled"
+            
+            for item in order.items:
+                await self.inventory_repo.log_change(
+                    product_id=item.product_id,
+                    change_quantity=item.quantity,
+                    notes=f"Order {order.id} cancelled",
+                    performed_by=user_id,
+                    commit=False
+                )
+                if item.product:
+                    await self.product_repo.update(
+                        item.product_id,
+                        stock=item.product.stock + item.quantity,
+                        commit=False
+                    )
+            
+            self.db.add(order)
+            
+        await self.db.commit()
         return self._format_order_response(order)
 
     def _format_order_response(self, order) -> OrderResponse:

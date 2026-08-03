@@ -229,16 +229,21 @@ class ProductRepository:
     async def update(
         self,
         product_id: str,
+        commit: bool = True,
         **kwargs,
     ) -> Product | None:
 
-        await self.db.execute(
-            update(Product)
-            .where(Product.id == product_id)
-            .values(**kwargs)
-        )
+        if kwargs:
+            await self.db.execute(
+                update(Product)
+                .where(Product.id == product_id)
+                .values(**kwargs)
+            )
 
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
 
         return await self.get_by_id(product_id)
 
@@ -249,7 +254,9 @@ class ProductRepository:
     async def delete(self, product_id: str) -> None:
 
         await self.db.execute(
-            delete(Product).where(Product.id == product_id)
+            update(Product)
+            .where(Product.id == product_id)
+            .values(is_active=False)
         )
 
         await self.db.commit()
