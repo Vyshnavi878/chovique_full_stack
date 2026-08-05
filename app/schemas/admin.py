@@ -1,7 +1,9 @@
 from typing import Optional
 from pydantic import BaseModel
 
-
+from app.schemas.user import UserResponse
+from app.schemas.order import OrderResponse
+from app.schemas.ticket import SupportTicketResponse
 class MonthlyRevenue(BaseModel):
     month: str          # e.g. "Jan 2025"
     online_revenue: float
@@ -43,6 +45,14 @@ class AuditLogEntry(BaseModel):
     resource: Optional[str]
     details: Optional[str]
     created_at: str  # ISO format string
+
+
+class CustomerDetailsResponse(BaseModel):
+    user: UserResponse
+    total_spent: float
+    total_orders: int
+    recent_orders: list[OrderResponse]
+    support_tickets: list[SupportTicketResponse]
 
 
 class UpdateOrderStatusPayload(BaseModel):
@@ -89,6 +99,7 @@ class CreateAdminRequest(BaseModel):
     full_name: str
     email: str
     password: str
+    role: str = "admin"
 
 
 class UpdateAdminPasswordPayload(BaseModel):

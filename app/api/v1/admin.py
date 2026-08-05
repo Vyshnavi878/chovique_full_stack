@@ -24,6 +24,7 @@ from app.schemas.admin import (
     UpdateAdminPasswordPayload,
     UpdateAdminRequest,
     UpdateOrderStatusPayload,
+    CustomerDetailsResponse,
 )
 from app.schemas.home import BannerResponse, ContactInfoResponse, StatsResponse, TestimonialResponse
 from app.schemas.order import OrderResponse
@@ -282,6 +283,36 @@ async def get_all_users(
     return await service.get_all_users()
 
 
+@router.get(
+    "/customers",
+    response_model=list[SystemUserResponse],
+    summary="Get all customers",
+)
+async def get_all_customers(
+    current_user: User = Depends(require_role(["admin", "superadmin"])),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    return await service.get_all_customers()
+
+
+@router.get(
+    "/customers/{user_id}",
+    response_model=CustomerDetailsResponse,
+    summary="Get customer details",
+)
+async def get_customer_details(
+    user_id: str,
+    current_user: User = Depends(require_role(["admin", "superadmin"])),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = AdminService(db)
+        return await service.get_customer_details(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
 @router.post(
     "/users",
     response_model=SystemUserResponse,
@@ -336,6 +367,22 @@ async def update_admin(
         return updated
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+@router.post(
+    "/users/{user_id}/promote",
+    response_model=SystemUserResponse,
+    summary="Promote an administrator to superadmin (superadmin only)",
+)
+async def promote_admin(
+    user_id: str,
+    current_user: User = Depends(require_role("superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    updated = await service.promote_admin(user_id, superadmin_id=current_user.id)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Administrator user not found or is already a superadmin.")
+    return updated
 
 
 @router.patch(

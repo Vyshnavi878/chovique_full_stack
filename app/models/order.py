@@ -6,8 +6,10 @@ from sqlalchemy.sql import func
 from app.db.base import Base
 
 
+import secrets
+
 def generate_order_id():
-    return f"ORD-{random.randint(10000, 99999)}-{str(uuid.uuid4())[:4].upper()}"
+    return f"ORD-{secrets.randbelow(90000) + 10000}-{str(uuid.uuid4())[:4].upper()}"
 
 
 class Order(Base):

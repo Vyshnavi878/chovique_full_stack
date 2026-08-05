@@ -28,6 +28,7 @@ from app.repositories.ticket_repository import TicketRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.admin import (
     AuditLogEntry,
+    BannerImageResponse,
     CreateAdminRequest,
     CreateBannerRequest,
     CreateReelRequest,
@@ -42,7 +43,10 @@ from app.schemas.admin import (
     SetContactRequest,
     SetStatsRequest,
     TopProduct,
+    UpdateAdminPasswordPayload,
+    UpdateAdminRequest,
     UpdateOrderStatusPayload,
+    CustomerDetailsResponse,
 )
 from app.schemas.home import BannerResponse, ContactInfoResponse, StatsResponse, TestimonialResponse
 from app.schemas.order import OrderResponse
@@ -341,17 +345,49 @@ class AdminService:
         users = result.scalars().all()
         return [SystemUserResponse.from_orm_user(u) for u in users]
 
+    async def get_all_customers(self) -> list[SystemUserResponse]:
+        result = await self.db.execute(select(User).where(User.role == "customer").order_by(User.created_at.desc()))
+        users = result.scalars().all()
+        return [SystemUserResponse.from_orm_user(u) for u in users]
+
+    async def get_customer_details(self, user_id: str) -> CustomerDetailsResponse:
+        user = await self.user_repo.get_by_id(user_id)
+        if not user or user.role != "customer":
+            raise ValueError("Customer not found.")
+
+        result_orders = await self.db.execute(select(Order).where(Order.user_id == user_id).order_by(Order.created_at.desc()))
+        orders = result_orders.scalars().all()
+        
+        result_tickets = await self.db.execute(select(SupportTicket).where(SupportTicket.user_id == user_id).order_by(SupportTicket.created_at.desc()))
+        tickets = result_tickets.scalars().all()
+
+        from app.schemas.user import UserResponse
+        from app.services.customer_service import CustomerService
+        
+        cs = CustomerService(self.db)
+        
+        return CustomerDetailsResponse(
+            user=UserResponse.from_orm_user(user),
+            total_spent=sum(o.total for o in orders),
+            total_orders=len(orders),
+            recent_orders=[cs._format_order_response(o) for o in orders[:5]],
+            support_tickets=[cs._format_ticket_response(t) for t in tickets],
+        )
+
     async def create_admin(self, payload: CreateAdminRequest, superadmin_id: str) -> SystemUserResponse:
         existing = await self.user_repo.get_by_email(payload.email)
         if existing:
             raise ValueError("User with this email already exists.")
+
+        if payload.role not in ["admin", "superadmin"]:
+            raise ValueError("Invalid role specified.")
 
         hashed_pw = hash_password(payload.password)
         new_admin = await self.user_repo.create(
             email=payload.email,
             hashed_password=hashed_pw,
             full_name=payload.full_name,
-            role="admin",
+            role=payload.role,
             is_email_verified=True,
             is_active=True,
         )
@@ -435,6 +471,26 @@ class AdminService:
             user_id=superadmin_id,
             resource=f"user:{user_id}",
             details=f"Updated administrator account: {', '.join(changes) if changes else 'no changes'}",
+        )
+
+        return SystemUserResponse.from_orm_user(user)
+
+    async def promote_admin(self, user_id: str, superadmin_id: str):
+        """Promote an admin to superadmin."""
+        from app.schemas.user import SystemUserResponse
+        user = await self.user_repo.get_by_id(user_id)
+        if not user or user.role != "admin":
+            return None
+
+        user.role = "superadmin"
+        await self.db.commit()
+        await self.db.refresh(user)
+
+        await self.audit_repo.log(
+            action="promote_admin",
+            user_id=superadmin_id,
+            resource=f"user:{user_id}",
+            details=f"Promoted {user.email} from admin to superadmin",
         )
 
         return SystemUserResponse.from_orm_user(user)

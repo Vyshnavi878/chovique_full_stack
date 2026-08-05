@@ -6,8 +6,10 @@ from sqlalchemy.sql import func
 from app.db.base import Base
 
 
+import secrets
+
 def generate_ticket_id():
-    return f"TKT-{random.randint(1000, 9999)}"
+    return f"TKT-{secrets.randbelow(9000) + 1000}"
 
 
 class SupportTicket(Base):

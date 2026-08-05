@@ -98,7 +98,9 @@ app = FastAPI(
 
 import os
 from fastapi.staticfiles import StaticFiles
+from app.middleware.csrf_middleware import CSRFMiddleware
 from app.middleware.audit import AuditLogMiddleware
+from app.middleware.logging_middleware import LoggingMiddleware
 
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -106,7 +108,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # NOTE: Middleware runs in REVERSE order of registration.
 # CORS must be added LAST so it executes FIRST (outermost layer),
 # ensuring preflight OPTIONS and all error responses include CORS headers.
+app.add_middleware(CSRFMiddleware)
 app.add_middleware(AuditLogMiddleware)
+app.add_middleware(LoggingMiddleware)
 
 if settings.ALLOWED_ORIGINS:
     app.add_middleware(

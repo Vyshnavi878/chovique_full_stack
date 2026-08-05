@@ -21,6 +21,7 @@ from app.api.v1 import (
     users,
     webhooks,
     wishlist,
+    theme,
 )
 from app.core.config import settings
 
@@ -43,3 +44,4 @@ api_router.include_router(coupons.router)
 api_router.include_router(inventory.router)
 api_router.include_router(contact.router)
 api_router.include_router(admin.router)
+api_router.include_router(theme.router, prefix="/theme", tags=["Theme Builder"])

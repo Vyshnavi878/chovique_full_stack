@@ -37,7 +37,7 @@ from app.models.inventory import InventoryLog  # noqa: F401
 from app.models.faq import FAQ  # noqa: F401
 from app.models.audit_log import AuditLog  # noqa: F401
 from app.models.offline_sale import OfflineSale  # noqa: F401
-
+from app.models.theme import ThemePreset  # noqa: F401
 # ==========================================================
 # Create Async Engine
 # ==========================================================

@@ -95,6 +95,24 @@ def set_auth_cookies( response: Response, access_token: str, refresh_token: str,
 
 
 # ======================================================
+# CSRF TOKEN
+# ======================================================
+
+@router.get("/csrf", summary="Get CSRF Token")
+def get_csrf_token(response: Response):
+    import secrets
+    token = secrets.token_hex(32)
+    response.set_cookie(
+        key="csrf_token",
+        value=token,
+        httponly=True,
+        secure=not settings.DEBUG,
+        samesite="lax",
+    )
+    return {"csrf_token": token}
+
+
+# ======================================================
 # REGISTER
 # ======================================================
 
