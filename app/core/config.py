@@ -112,6 +112,13 @@ class Settings(BaseSettings):
     SUPERADMIN_EMAIL: str = "superadmin@chovique.com"
     SUPERADMIN_PASSWORD: str = "SuperAdmin123!"
 
+    # =====================================================
+    # Startup Seeding
+    # =====================================================
+    # Set to True to auto-seed default banners, testimonials and products
+    # on a fresh database. Keep False in production for an empty slate.
+    SEED_DEFAULT_DATA: bool = False
+
 
 
 @lru_cache

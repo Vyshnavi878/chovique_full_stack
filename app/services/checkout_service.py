@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -69,7 +70,12 @@ class CheckoutService:
         discount = 0.0
         if payload.coupon_code:
             coupon = await self.coupon_repo.get_by_code(payload.coupon_code)
-            if coupon and coupon.is_active:
+            now_utc = datetime.now(timezone.utc)
+            if (
+                coupon
+                and coupon.is_active
+                and (coupon.expires_at is None or coupon.expires_at > now_utc)
+            ):
                 # Check min order value if applicable
                 if coupon.discount_percent > 0:
                     discount = (subtotal * coupon.discount_percent) / 100.0
@@ -90,7 +96,8 @@ class CheckoutService:
             total=total_rounded,
             subtotal=round(subtotal, 2),
             discount=round(discount, 2),
-            shipping=round(shipping + tax, 2),
+            shipping=round(shipping, 2),
+            tax=round(tax, 2),
             shipping_address=shipping_addr_dict,
             delivery_option=payload.delivery_option,
             payment_method=payload.payment_method,

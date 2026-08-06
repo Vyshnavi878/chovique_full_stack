@@ -140,8 +140,12 @@ class InvoiceService:
                             <td style="text-align: right; padding: 10px; color: red;">-₹{order.discount:.2f}</td>
                         </tr>
                         <tr>
-                            <td colspan="3" style="text-align: right; padding: 10px;">Shipping & Tax</td>
+                            <td colspan="3" style="text-align: right; padding: 10px;">Shipping</td>
                             <td style="text-align: right; padding: 10px;">₹{order.shipping:.2f}</td>
+                        </tr>
+                        <tr>
+                            <td colspan="3" style="text-align: right; padding: 10px;">GST (5%)</td>
+                            <td style="text-align: right; padding: 10px;">₹{order.tax:.2f}</td>
                         </tr>
                         <tr style="font-size: 1.2em;">
                             <td colspan="3" style="text-align: right; padding: 10px; border-top: 2px solid #333;"><strong>Total</strong></td>

@@ -6,9 +6,11 @@ order placement & list, support tickets, notifications, contact form, product re
 """
 
 import pytest
+from datetime import datetime, timezone, timedelta
 from httpx import AsyncClient
 
 from app.db.seed_data import seed_database
+from app.models.coupon import Coupon
 from tests.conftest import TestSessionLocal
 
 pytestmark = pytest.mark.asyncio
@@ -140,6 +142,52 @@ class TestCoupons:
         assert res.status_code == 200
         data = res.json()
         assert data["valid"] is False
+
+    async def test_validate_expired_coupon(self, client: AsyncClient):
+        """An expired coupon must be rejected by /coupons/validate."""
+        async with TestSessionLocal() as session:
+            expired_coupon = Coupon(
+                code="EXPIRED10",
+                description="Expired test coupon",
+                discount_percent=10.0,
+                discount_amount=0.0,
+                is_active=True,
+                expires_at=datetime.now(timezone.utc) - timedelta(days=1),
+            )
+            session.add(expired_coupon)
+            await session.commit()
+
+        res = await client.post(
+            "/api/v1/coupons/validate",
+            json={"code": "EXPIRED10"},
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["valid"] is False
+        assert data["message"] == "Invalid or expired promo code."
+
+    async def test_validate_inactive_coupon(self, client: AsyncClient):
+        """An is_active=False coupon must be rejected by /coupons/validate."""
+        async with TestSessionLocal() as session:
+            inactive_coupon = Coupon(
+                code="INACTIVE10",
+                description="Inactive test coupon",
+                discount_percent=10.0,
+                discount_amount=0.0,
+                is_active=False,
+                expires_at=None,
+            )
+            session.add(inactive_coupon)
+            await session.commit()
+
+        res = await client.post(
+            "/api/v1/coupons/validate",
+            json={"code": "INACTIVE10"},
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["valid"] is False
+        assert data["message"] == "Invalid or expired promo code."
 
     async def test_user_coupons_list(self, authenticated_client: AsyncClient):
         await _seed()

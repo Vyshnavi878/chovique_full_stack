@@ -241,6 +241,18 @@ class CustomerService:
                 message="Invalid or expired promo code.",
             )
 
+        now_utc = datetime.now(timezone.utc)
+        if not coupon.is_active or (
+            coupon.expires_at is not None and coupon.expires_at <= now_utc
+        ):
+            return CouponValidationResponse(
+                valid=False,
+                code=code,
+                discount_percent=0.0,
+                discount_amount=0.0,
+                message="Invalid or expired promo code.",
+            )
+
         return CouponValidationResponse(
             valid=True,
             code=coupon.code,
@@ -294,14 +306,20 @@ class CustomerService:
             discount = 0.0
             if payload.coupon_code:
                 coupon = await self.coupon_repo.get_by_code(payload.coupon_code)
-                if coupon:
+                now_utc = datetime.now(timezone.utc)
+                if (
+                    coupon
+                    and coupon.is_active
+                    and (coupon.expires_at is None or coupon.expires_at > now_utc)
+                ):
                     if coupon.discount_percent > 0:
                         discount = (subtotal * coupon.discount_percent) / 100.0
                     elif coupon.discount_amount > 0:
                         discount = coupon.discount_amount
 
             shipping = 0.0 if subtotal > 1500 else 99.0
-            total = max(0.0, subtotal - discount + shipping)
+            tax = round(subtotal * 0.05, 2)  # 5% GST
+            total = max(0.0, subtotal - discount + shipping + tax)
 
             shipping_addr_dict = payload.shipping_address.model_dump()
 
@@ -311,6 +329,7 @@ class CustomerService:
                 subtotal=round(subtotal, 2),
                 discount=round(discount, 2),
                 shipping=round(shipping, 2),
+                tax=round(tax, 2),
                 shipping_address=shipping_addr_dict,
                 delivery_option=payload.delivery_option,
                 payment_method=payload.payment_method,
@@ -393,6 +412,7 @@ class CustomerService:
             subtotal=order.subtotal,
             discount=order.discount,
             shipping=order.shipping,
+            tax=order.tax,
             status=order.status,
             delivery_option=order.delivery_option,
             payment_method=order.payment_method,
@@ -458,6 +478,7 @@ class CustomerService:
             subtotal=order.subtotal,
             discount=order.discount,
             shipping=order.shipping,
+            tax=order.tax,
             date=created_date,
             status=order.status,
             shippingAddress=ship_addr,

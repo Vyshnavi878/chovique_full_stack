@@ -38,6 +38,7 @@ class OrderResponse(BaseModel):
     subtotal: float
     discount: float
     shipping: float
+    tax: float = 0.0
     date: str
     status: str
     shippingAddress: ShippingAddressSchema

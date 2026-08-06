@@ -71,9 +71,10 @@ async def lifespan(app: FastAPI):
     try:
         async with AsyncSessionLocal() as db:
             await ensure_superadmin_exists(db)
-            await ensure_default_banners_exist(db)
-            await ensure_default_testimonials_exist(db)
-            await ensure_default_products_exist(db)
+            if settings.SEED_DEFAULT_DATA:
+                await ensure_default_banners_exist(db)
+                await ensure_default_testimonials_exist(db)
+                await ensure_default_products_exist(db)
     except Exception as e:
         logger.error("Startup initialization failed: %s", e)
 
