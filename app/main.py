@@ -90,12 +90,61 @@ async def lifespan(app: FastAPI):
 # App
 # ==========================================================
 
+from fastapi.responses import HTMLResponse
+
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     debug=settings.DEBUG,
     lifespan=lifespan,
+    docs_url=None,
 )
+
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui_html():
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+<link type="text/css" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+<link rel="shortcut icon" href="https://fastapi.tiangolo.com/img/favicon.png">
+<title>{settings.APP_NAME} - Swagger UI</title>
+</head>
+<body>
+<div id="swagger-ui"></div>
+<script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+<script>
+window.onload = function() {{
+    window.ui = SwaggerUIBundle({{
+        url: '{app.openapi_url}',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [
+            SwaggerUIBundle.presets.apis,
+            SwaggerUIStandalonePreset
+        ],
+        plugins: [
+            SwaggerUIBundle.plugins.DownloadUrl
+        ],
+        requestInterceptor: function(req) {{
+            if (req.method && !['GET', 'HEAD', 'OPTIONS'].includes(req.method.toUpperCase())) {{
+                const cookieValue = `; ${{document.cookie}}`;
+                const parts = cookieValue.split(`; csrf_token=`);
+                if (parts.length === 2) {{
+                    const token = parts.pop().split(';').shift();
+                    if (token) {{
+                        req.headers['X-CSRF-Token'] = token;
+                    }}
+                }}
+            }}
+            return req;
+        }}
+    }});
+}};
+</script>
+</body>
+</html>"""
+    return HTMLResponse(html)
 
 import os
 from fastapi.staticfiles import StaticFiles

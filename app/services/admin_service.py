@@ -84,11 +84,18 @@ class AdminService:
         from app.models.order import OrderItem
         from app.models.offline_sale import OfflineSale
 
-        # --- Basic counts (existing) ---
-        sales_result = await self.db.execute(select(func.sum(Order.total)))
-        total_sales = sales_result.scalar() or 0.0
+        # --- Valid Paid/Completed Order Statuses ---
+        valid_statuses = ["Paid", "Delivered", "Shipped", "Processing"]
 
-        orders_result = await self.db.execute(select(func.count()).select_from(Order))
+        # --- Basic counts ---
+        sales_result = await self.db.execute(
+            select(func.sum(Order.total)).where(Order.status.in_(valid_statuses))
+        )
+        total_sales = round(sales_result.scalar() or 0.0, 2)
+
+        orders_result = await self.db.execute(
+            select(func.count()).select_from(Order).where(Order.status.in_(valid_statuses))
+        )
         total_orders = orders_result.scalar() or 0
 
         users_result = await self.db.execute(
@@ -111,11 +118,11 @@ class AdminService:
         pending_tickets_count = tickets_result.scalar() or 0
 
         # --- Extended KPI metrics ---
-        # Total units sold (non-cancelled orders only)
+        # Total units sold (valid paid/completed orders only)
         units_sold_result = await self.db.execute(
             select(func.sum(OrderItem.quantity))
             .join(Order, OrderItem.order_id == Order.id)
-            .where(Order.status != "Cancelled")
+            .where(Order.status.in_(valid_statuses))
         )
         total_units_sold = int(units_sold_result.scalar() or 0)
 
@@ -123,9 +130,9 @@ class AdminService:
         stock_result = await self.db.execute(select(func.sum(Product.stock)))
         total_inventory_stock = int(stock_result.scalar() or 0)
 
-        # Online revenue (non-cancelled orders)
+        # Online revenue (valid paid/completed orders)
         online_rev_result = await self.db.execute(
-            select(func.sum(Order.total)).where(Order.status != "Cancelled")
+            select(func.sum(Order.total)).where(Order.status.in_(valid_statuses))
         )
         total_online_revenue = round(online_rev_result.scalar() or 0.0, 2)
 
@@ -149,7 +156,7 @@ class AdminService:
 
             online_mo_result = await self.db.execute(
                 select(func.sum(Order.total)).where(
-                    Order.status != "Cancelled",
+                    Order.status.in_(valid_statuses),
                     extract("year", Order.created_at) == yr,
                     extract("month", Order.created_at) == mo,
                 )
@@ -178,13 +185,13 @@ class AdminService:
                 Product.name,
                 func.coalesce(func.sum(OrderItem.quantity), 0).label("units_sold"),
                 Product.stock,
-                func.coalesce(func.sum(OrderItem.quantity * OrderItem.price), 0.0).label("revenue"),
+                func.coalesce(func.sum(OrderItem.price * OrderItem.quantity), 0.0).label("revenue"),
             )
-            .outerjoin(OrderItem, OrderItem.product_id == Product.id)
-            .outerjoin(Order, Order.id == OrderItem.order_id)
-            .where(Order.status.in_(["Processing", "Shipped", "Delivered", None]) | (Order.id == None))
+            .join(OrderItem, Product.id == OrderItem.product_id)
+            .join(Order, OrderItem.order_id == Order.id)
+            .where(Order.status.in_(valid_statuses))
             .group_by(Product.id, Product.name, Product.stock)
-            .order_by(func.coalesce(func.sum(OrderItem.quantity), 0).desc())
+            .order_by(func.sum(OrderItem.quantity).desc())
             .limit(5)
         )
         top_products = [
@@ -491,6 +498,29 @@ class AdminService:
             user_id=superadmin_id,
             resource=f"user:{user_id}",
             details=f"Promoted {user.email} from admin to superadmin",
+        )
+
+        return SystemUserResponse.from_orm_user(user)
+
+    async def demote_admin(self, user_id: str, superadmin_id: str):
+        """Demote a superadmin to admin."""
+        from app.schemas.user import SystemUserResponse
+        if user_id == superadmin_id:
+            raise ValueError("You cannot demote your own active superadmin account.")
+            
+        user = await self.user_repo.get_by_id(user_id)
+        if not user or user.role != "superadmin":
+            return None
+
+        user.role = "admin"
+        await self.db.commit()
+        await self.db.refresh(user)
+
+        await self.audit_repo.log(
+            action="demote_admin",
+            user_id=superadmin_id,
+            resource=f"user:{user_id}",
+            details=f"Demoted {user.email} from superadmin to admin",
         )
 
         return SystemUserResponse.from_orm_user(user)

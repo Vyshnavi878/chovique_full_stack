@@ -12,4 +12,3 @@ class RefreshTokenResponse(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
-    dev_otp: str | None = None

@@ -88,8 +88,8 @@ class CustomerService:
                 payload.address_zip
             ]
         )
+        address_repo = AddressRepository(self.db)
         if has_address_update:
-            address_repo = AddressRepository(self.db)
             addresses = await address_repo.get_user_addresses(user_id)
             default_addr = next((a for a in addresses if a.is_default), addresses[0] if addresses else None)
             if default_addr:
@@ -394,31 +394,8 @@ class CustomerService:
         # The final commit is done automatically by `async with self.db.begin_nested():` and the router dependency
         await self.db.commit()
 
-        # Build Response
-        order_items = []
-        for d in items_data:
-            p = await self.product_repo.get_by_id(d["product_id"])
-            order_items.append({
-                "product_id": d["product_id"],
-                "product_name": p.name if p else "Unknown",
-                "quantity": d["quantity"],
-                "price": d["price"]
-            })
-
-        return OrderResponse(
-            id=order.id,
-            user_id=order.user_id,
-            total=order.total,
-            subtotal=order.subtotal,
-            discount=order.discount,
-            shipping=order.shipping,
-            tax=order.tax,
-            status=order.status,
-            delivery_option=order.delivery_option,
-            payment_method=order.payment_method,
-            items=order_items,
-            created_at=order.created_at,
-        )
+        db_order = await self.order_repo.get_by_id(order.id)
+        return self._format_order_response(db_order or order)
 
     async def get_user_orders(self, user_id: str) -> list[OrderResponse]:
         orders = await self.order_repo.get_user_orders(user_id)
@@ -521,6 +498,18 @@ class CustomerService:
             type="support",
             reference_id=ticket.id,
         )
+
+        try:
+            from app.integrations.resend import resend_email
+            await resend_email.send_ticket_created(
+                email=user.email,
+                name=user.full_name,
+                ticket_id=ticket.id,
+                category=ticket.category,
+                description=ticket.description,
+            )
+        except Exception as e:
+            logger.error("Failed to send ticket creation email: %s", e)
 
         return self._format_ticket_response(ticket)
 

@@ -636,10 +636,7 @@ class AuthService:
 
         logger.info("Forgot password OTP sent to %s", email)
 
-        res = {"message": "If email exists, OTP has been sent."}
-        if settings.DEBUG:
-            res["dev_otp"] = otp
-        return res
+        return {"message": "If email exists, OTP has been sent."}
 
 
 
@@ -695,10 +692,7 @@ class AuthService:
 
         logger.info("Forgot password OTP resent to %s", email)
 
-        res = {"message": "If email exists, OTP has been sent."}
-        if settings.DEBUG:
-            res["dev_otp"] = otp
-        return res
+        return {"message": "If email exists, OTP has been sent."}
 
 
     # ======================================================

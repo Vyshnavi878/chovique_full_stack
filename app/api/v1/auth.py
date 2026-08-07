@@ -71,9 +71,14 @@ def _handle_otp_exception(e: Exception):
 # Cookie Helpers
 # ======================================================
 
-def set_auth_cookies( response: Response, access_token: str, refresh_token: str,):
+def generate_csrf_token() -> str:
+    import secrets
+    return secrets.token_urlsafe(32)
 
-    # Access Token Cookie
+
+def set_auth_cookies(response: Response, access_token: str, refresh_token: str, csrf_token: str | None = None):
+
+    # Access Token Cookie (HttpOnly)
     response.set_cookie(
         key="access_token",
         value=access_token,
@@ -83,7 +88,7 @@ def set_auth_cookies( response: Response, access_token: str, refresh_token: str,
         max_age=60 * settings.ACCESS_TOKEN_EXPIRE_MINUTES,
     )
 
-    # Refresh Token Cookie
+    # Refresh Token Cookie (HttpOnly)
     response.set_cookie(
         key="refresh_token",
         value=refresh_token,
@@ -93,6 +98,20 @@ def set_auth_cookies( response: Response, access_token: str, refresh_token: str,
         max_age=60 * 60 * 24 * settings.REFRESH_TOKEN_EXPIRE_DAYS,
     )
 
+    # CSRF Token Cookie (HttpOnly=False so frontend JS can read it for Double Submit Cookie pattern)
+    if not csrf_token:
+        csrf_token = generate_csrf_token()
+
+    response.set_cookie(
+        key="csrf_token",
+        value=csrf_token,
+        httponly=False,
+        secure=not settings.DEBUG,
+        samesite="lax",
+        max_age=60 * 60 * 24 * settings.REFRESH_TOKEN_EXPIRE_DAYS,
+    )
+    return csrf_token
+
 
 # ======================================================
 # CSRF TOKEN
@@ -100,12 +119,11 @@ def set_auth_cookies( response: Response, access_token: str, refresh_token: str,
 
 @router.get("/csrf", summary="Get CSRF Token")
 def get_csrf_token(response: Response):
-    import secrets
-    token = secrets.token_hex(32)
+    token = generate_csrf_token()
     response.set_cookie(
         key="csrf_token",
         value=token,
-        httponly=True,
+        httponly=False,
         secure=not settings.DEBUG,
         samesite="lax",
     )
@@ -460,6 +478,9 @@ async def logout(
         )
         response.delete_cookie(
             key="refresh_token"
+        )
+        response.delete_cookie(
+            key="csrf_token"
         )
         return {
             "message":

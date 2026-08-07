@@ -252,13 +252,12 @@ class ProductRepository:
     # ==========================================================
 
     async def delete(self, product_id: str) -> None:
+        from app.models.cart import CartItem
+        from app.models.wishlist import WishlistItem
 
-        await self.db.execute(
-            update(Product)
-            .where(Product.id == product_id)
-            .values(is_active=False)
-        )
-
+        await self.db.execute(delete(CartItem).where(CartItem.product_id == product_id))
+        await self.db.execute(delete(WishlistItem).where(WishlistItem.product_id == product_id))
+        await self.db.execute(delete(Product).where(Product.id == product_id))
         await self.db.commit()
 
     # ==========================================================

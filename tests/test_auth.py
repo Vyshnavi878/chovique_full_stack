@@ -494,7 +494,12 @@ class TestForgotPassword:
 class TestLogout:
 
     async def test_logout(self, client: AsyncClient):
-        response = await client.post("/api/v1/auth/logout")
+        # Logout is a protected state-changing endpoint requiring CSRF
+        client.cookies.set("csrf_token", "LOGOUT_CSRF_TOKEN")
+        response = await client.post(
+            "/api/v1/auth/logout",
+            headers={"X-CSRF-Token": "LOGOUT_CSRF_TOKEN"},
+        )
         assert response.status_code == 200
         assert response.json()["message"] == "Logout successful."
 
@@ -517,3 +522,72 @@ class TestProtectedRoute:
         data = response.json()
         assert data["email"] == "test@example.com"
         assert data["name"] == "Test User"
+
+
+# ==========================================================
+# CSRF Security Suite
+# ==========================================================
+
+class TestCSRFSecurity:
+
+    async def test_public_endpoint_without_csrf(self, client: AsyncClient):
+        response = await client.post(
+            "/api/v1/auth/register",
+            json={
+                "full_name": "Public User",
+                "email": "public_csrf@example.com",
+                "password": "SecurePass1!",
+                "confirm_password": "SecurePass1!",
+            },
+        )
+        # Should pass CSRF middleware and reach endpoint logic
+        assert response.status_code == 200
+
+    async def test_protected_endpoint_without_csrf(self, client: AsyncClient):
+        response = await client.post(
+            "/api/v1/auth/change-password",
+            json={
+                "current_password": "OldPassword1!",
+                "new_password": "NewPassword1!",
+                "confirm_password": "NewPassword1!",
+            },
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "CSRF token validation failed"
+
+    async def test_protected_endpoint_mismatched_csrf(self, client: AsyncClient):
+        client.cookies.set("csrf_token", "COOKIE_TOKEN_123")
+        response = await client.post(
+            "/api/v1/auth/change-password",
+            headers={"X-CSRF-Token": "DIFFERENT_HEADER_TOKEN_456"},
+            json={
+                "current_password": "OldPassword1!",
+                "new_password": "NewPassword1!",
+                "confirm_password": "NewPassword1!",
+            },
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "CSRF token validation failed"
+
+    async def test_protected_endpoint_matching_csrf(self, client: AsyncClient):
+        token = "MATCHING_CSRF_TOKEN_789"
+        client.cookies.set("csrf_token", token)
+        response = await client.post(
+            "/api/v1/auth/change-password",
+            headers={"X-CSRF-Token": token},
+            json={
+                "current_password": "OldPassword1!",
+                "new_password": "NewPassword1!",
+                "confirm_password": "NewPassword1!",
+            },
+        )
+        # CSRF passes; proceeds to authentication layer (401 because no access_token)
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Not authenticated."
+
+    async def test_swagger_docs_has_request_interceptor(self, client: AsyncClient):
+        response = await client.get("/docs")
+        assert response.status_code == 200
+        assert "requestInterceptor" in response.text
+        assert "X-CSRF-Token" in response.text
+

@@ -106,5 +106,16 @@ class ResendEmailIntegration:
         """
         return await self.send_email(email, subject, html)
 
+    async def send_ticket_created(self, email: str, name: str, ticket_id: str, category: str, description: str):
+        subject = f"Support Ticket Received — #{ticket_id[:8]}"
+        html = f"""
+        <h2>Support Ticket Received</h2>
+        <p>Dear {name},</p>
+        <p>Your support request <strong>#{ticket_id[:8]}</strong> under category <strong>{category}</strong> has been received.</p>
+        <p><strong>Description:</strong> {description}</p>
+        <p>Our concierge team will review your complaint and respond shortly.</p>
+        """
+        return await self.send_email(email, subject, html)
+
 
 resend_email = ResendEmailIntegration()

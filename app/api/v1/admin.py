@@ -385,6 +385,26 @@ async def promote_admin(
     return updated
 
 
+@router.post(
+    "/users/{user_id}/demote",
+    response_model=SystemUserResponse,
+    summary="Demote a superadmin to admin (superadmin only)",
+)
+async def demote_admin(
+    user_id: str,
+    current_user: User = Depends(require_role("superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    try:
+        updated = await service.demote_admin(user_id, superadmin_id=current_user.id)
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Superadmin user not found or is already an admin.")
+        return updated
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
 @router.patch(
     "/users/{user_id}/password",
     summary="Update an administrator password (superadmin only)",
