@@ -31,6 +31,7 @@ from app.schemas.admin import (
     BannerImageResponse,
     CreateAdminRequest,
     CreateBannerRequest,
+    UpdateBannerRequest,
     CreateReelRequest,
     CreateTestimonialRequest,
     DashboardStatsResponse,
@@ -651,6 +652,7 @@ class AdminService:
     async def create_banner(
         self,
         payload: CreateBannerRequest,
+    UpdateBannerRequest,
         image_file: Optional[UploadFile] = None,
     ) -> BannerResponse:
         image_url = payload.image
@@ -1062,4 +1064,4 @@ async def ensure_default_products_exist(db: AsyncSession) -> None:
 
     for d in defaults:
         await product_repo.create(**d)
-    logger.info("Default luxury products seeded successfully.")
+    logger.info("Default luxury products seeded successfully.")

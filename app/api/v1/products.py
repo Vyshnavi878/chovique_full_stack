@@ -293,6 +293,59 @@ async def update_product(
     return product
 
 
+@router.post(
+    "/{product_id}/image",
+    response_model=ProductResponse,
+    summary="Update a product's image (admin only)",
+)
+async def update_product_image(
+    product_id: str,
+    images: List[UploadFile] = File(...),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = ProductService(db)
+    product = await service.get_product(product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    # Upload all new images
+    image_urls = []
+    for img in images:
+        if img and hasattr(img, "filename") and img.filename:
+            url = await cloudinary_service.upload_image(
+                file=img,
+                folder="chocolate-world/products",
+            )
+            image_urls.append(url)
+
+    if not image_urls:
+        raise HTTPException(status_code=400, detail="No valid images provided")
+
+    # Delete old main image if exists
+    if product.image:
+        public_id = cloudinary_service.extract_public_id(product.image)
+        if public_id:
+            cloudinary_service.delete_media(public_id)
+
+    # Also delete old gallery images
+    if product.images:
+        for old_img in product.images:
+            if old_img and old_img != product.image:
+                public_id = cloudinary_service.extract_public_id(old_img)
+                if public_id:
+                    cloudinary_service.delete_media(public_id)
+
+    updated_product = await service.update_product(
+        product_id, 
+        ProductUpdate(
+            image=image_urls[0],
+            hover_image=image_urls[0] if len(image_urls) == 1 else image_urls[1],
+            images=image_urls
+        )
+    )
+    return updated_product
+
 # ======================================================
 # DELETE PRODUCT (Admin only)
 # ======================================================

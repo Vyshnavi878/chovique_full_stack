@@ -126,6 +126,16 @@ class CreateBannerRequest(BaseModel):
     sort_order: int = 0
     is_active: bool = True
 
+class UpdateBannerRequest(BaseModel):
+    title: Optional[str] = None
+    subtitle: Optional[str] = None
+    tag: Optional[str] = None
+    image: Optional[str] = None
+    button_text: Optional[str] = None
+    link: Optional[str] = None
+    sort_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
 
 # ======================================================
 # CMS — Testimonials

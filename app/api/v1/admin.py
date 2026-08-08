@@ -11,6 +11,7 @@ from app.schemas.admin import (
     BannerImageResponse,
     CreateAdminRequest,
     CreateBannerRequest,
+    UpdateBannerRequest,
     CreateReelRequest,
     CreateTestimonialRequest,
     DashboardStatsResponse,
@@ -561,6 +562,20 @@ async def create_banner(
     return await service.create_banner(payload, image_file=image)
 
 
+@router.patch(
+    "/banners/{banner_id}",
+    response_model=BannerResponse,
+    summary="Update a banner (admin only)",
+)
+async def update_banner(
+    banner_id: str,
+    payload: UpdateBannerRequest,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    return await service.update_banner(banner_id, payload)
+
 @router.delete(
     "/banners/{banner_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -825,4 +840,4 @@ async def delete_story_video(
     service = AdminService(db)
     video_url = await service.delete_story_video()
     return {"video_url": video_url}
-
+

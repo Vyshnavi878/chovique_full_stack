@@ -55,6 +55,7 @@ class ProductResponse(BaseModel):
     isFeatured: bool = False
     isBestseller: bool = False
     isNewArrival: bool = False
+    images: list[str] = []
     reviews: list[ReviewResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
@@ -101,6 +102,7 @@ class ProductResponse(BaseModel):
             isFeatured=getattr(product, "is_featured", False),
             isBestseller=getattr(product, "is_bestseller", False),
             isNewArrival=getattr(product, "is_new_arrival", False),
+            images=getattr(product, "images", []) or [],
             reviews=reviews,
         )
 
@@ -128,6 +130,7 @@ class ProductCreate(BaseModel):
     is_featured: bool = False
     is_bestseller: bool = False
     is_new_arrival: bool = False
+    images: list[str] = []
 
 
 
@@ -155,6 +158,7 @@ class ProductUpdate(BaseModel):
     is_featured: Optional[bool] = None
     is_bestseller: Optional[bool] = None
     is_new_arrival: Optional[bool] = None
+    images: Optional[list[str]] = None
 
 
 

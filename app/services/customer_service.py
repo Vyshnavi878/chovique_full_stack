@@ -226,52 +226,7 @@ class CustomerService:
     # Coupons
     # ==========================================================
 
-    async def validate_coupon(
-        self,
-        code: str,
-    ) -> CouponValidationResponse:
 
-        coupon = await self.coupon_repo.get_by_code(code)
-        if not coupon:
-            return CouponValidationResponse(
-                valid=False,
-                code=code,
-                discount_percent=0.0,
-                discount_amount=0.0,
-                message="Invalid or expired promo code.",
-            )
-
-        now_utc = datetime.now(timezone.utc)
-        if not coupon.is_active or (
-            coupon.expires_at is not None and coupon.expires_at <= now_utc
-        ):
-            return CouponValidationResponse(
-                valid=False,
-                code=code,
-                discount_percent=0.0,
-                discount_amount=0.0,
-                message="Invalid or expired promo code.",
-            )
-
-        return CouponValidationResponse(
-            valid=True,
-            code=coupon.code,
-            discount_percent=coupon.discount_percent,
-            discount_amount=coupon.discount_amount if coupon.discount_amount > 0 else None,
-            message=f"Promo code {coupon.code} applied successfully!",
-        )
-
-    async def get_user_coupons(self, user_id: str) -> list[UserCouponResponse]:
-        coupons = await self.coupon_repo.get_active_coupons()
-        return [
-            UserCouponResponse(
-                code=c.code,
-                desc=c.description,
-                exp=c.expires_at.strftime("%Y-%m-%d") if c.expires_at else "2026-12-31",
-                discountPercent=c.discount_percent,
-            )
-            for c in coupons
-        ]
 
     # ==========================================================
     # Orders
@@ -305,17 +260,11 @@ class CustomerService:
 
             discount = 0.0
             if payload.coupon_code:
-                coupon = await self.coupon_repo.get_by_code(payload.coupon_code)
-                now_utc = datetime.now(timezone.utc)
-                if (
-                    coupon
-                    and coupon.is_active
-                    and (coupon.expires_at is None or coupon.expires_at > now_utc)
-                ):
-                    if coupon.discount_percent > 0:
-                        discount = (subtotal * coupon.discount_percent) / 100.0
-                    elif coupon.discount_amount > 0:
-                        discount = coupon.discount_amount
+                from app.services.coupon_service import CouponService
+                c_service = CouponService(self.db)
+                val_res = await c_service.validate_and_calculate_discount(user_id, payload.coupon_code)
+                if val_res.valid:
+                    discount = val_res.calculated_discount
 
             shipping = 0.0 if subtotal > 1500 else 99.0
             tax = round(subtotal * 0.05, 2)  # 5% GST
@@ -336,6 +285,17 @@ class CustomerService:
                 items_data=items_data,
                 commit=False,
             )
+
+            if payload.coupon_code and discount > 0:
+                from app.models.coupon import CouponUsage
+                coupon = await self.coupon_repo.get_by_code(payload.coupon_code)
+                if coupon:
+                    self.db.add(CouponUsage(
+                        coupon_id=coupon.id,
+                        user_id=user_id,
+                        order_id=order.id,
+                        discount_amount=discount
+                    ))
 
             # Clean up ordered items from database Cart & Wishlist tables
             try:

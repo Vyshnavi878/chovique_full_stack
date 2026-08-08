@@ -80,6 +80,7 @@ async def init_db() -> None:
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_featured BOOLEAN NOT NULL DEFAULT FALSE;",
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_bestseller BOOLEAN NOT NULL DEFAULT FALSE;",
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_new_arrival BOOLEAN NOT NULL DEFAULT FALSE;",
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS images JSON;",
         ]
         for stmt in alter_statements:
             try:

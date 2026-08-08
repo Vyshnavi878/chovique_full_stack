@@ -46,6 +46,19 @@ class BannerRepository:
         return result.scalar_one_or_none()
 
     # ==========================================================
+    # Update
+    # ==========================================================
+
+    async def update(self, banner: Banner, **kwargs) -> Banner:
+        for key, value in kwargs.items():
+            if hasattr(banner, key):
+                setattr(banner, key, value)
+        
+        await self.db.commit()
+        await self.db.refresh(banner)
+        return banner
+
+    # ==========================================================
     # Delete
     # ==========================================================
 

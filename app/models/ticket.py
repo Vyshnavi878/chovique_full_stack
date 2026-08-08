@@ -27,4 +27,4 @@ class SupportTicket(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    customer = relationship("User", backref="tickets")
+    customer = relationship("User")

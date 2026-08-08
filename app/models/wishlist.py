@@ -17,5 +17,5 @@ class WishlistItem(Base):
         UniqueConstraint("user_id", "product_id", name="uq_user_product_wishlist"),
     )
 
-    user = relationship("User", backref="wishlist")
+    user = relationship("User")
     product = relationship("Product")

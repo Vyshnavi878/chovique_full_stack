@@ -116,6 +116,7 @@ class ProductService:
             badge=data.badge,
             image=data.image,
             hover_image=data.hover_image,
+            images=data.images,
             rating=data.rating,
             ratings_count=data.ratings_count,
             sort_order=data.sort_order,

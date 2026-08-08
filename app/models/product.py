@@ -64,6 +64,7 @@ class Product(Base):
 
     image = Column(Text, nullable=True)
     hover_image = Column(Text, nullable=True)
+    images = Column(JSON, nullable=True, default=list)
 
     # ==========================
     # Ratings

@@ -125,5 +125,24 @@ class CloudinaryService:
             logger.error("Failed to delete Cloudinary asset '%s': %s", public_id, e)
             return False
 
+    def extract_public_id(self, url: str) -> Optional[str]:
+        """Extract public ID from a Cloudinary URL to be used for deletion."""
+        if not url or "cloudinary" not in url:
+            return None
+        try:
+            parts = url.split("/upload/")
+            if len(parts) < 2:
+                return None
+            path_after_upload = parts[1]
+            
+            path_parts = path_after_upload.split("/")
+            if len(path_parts) > 1 and path_parts[0].startswith("v") and path_parts[0][1:].isdigit():
+                path_parts = path_parts[1:]
+            
+            public_id_with_ext = "/".join(path_parts)
+            public_id = public_id_with_ext.rsplit(".", 1)[0]
+            return public_id
+        except Exception:
+            return None
 
 cloudinary_service = CloudinaryService()
