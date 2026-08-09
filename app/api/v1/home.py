@@ -1,7 +1,11 @@
-from fastapi import APIRouter, Depends
+from typing import Optional
+from fastapi import APIRouter, Depends, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_user_optional
 from app.db.session import get_db
+from app.models.user import User
 from app.services.home_service import HomeService
 from app.schemas.home import (
     BannerResponse,
@@ -12,6 +16,13 @@ from app.schemas.home import (
 )
 
 router = APIRouter(prefix="/home", tags=["Home Page"])
+
+
+class CreateCustomerTestimonialPayload(BaseModel):
+    author: str
+    text: str
+    title: Optional[str] = None
+    rating: float = Field(default=5.0, ge=1, le=5)
 
 
 # ======================================================
@@ -53,7 +64,7 @@ async def get_banners(
 
 
 # ======================================================
-# GET TESTIMONIALS
+# TESTIMONIALS (Public GET approved / Customer POST submit)
 # ======================================================
 
 @router.get(
@@ -66,6 +77,28 @@ async def get_testimonials(
 ):
     service = HomeService(db)
     return await service.get_testimonials()
+
+
+@router.post(
+    "/testimonials",
+    response_model=TestimonialResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Submit brand testimonial (pending admin approval)",
+)
+async def submit_testimonial(
+    payload: CreateCustomerTestimonialPayload,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    service = HomeService(db)
+    user_id = current_user.id if current_user else None
+    return await service.submit_testimonial(
+        author=payload.author,
+        text=payload.text,
+        title=payload.title,
+        rating=payload.rating,
+        user_id=user_id,
+    )
 
 
 # ======================================================

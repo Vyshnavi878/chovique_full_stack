@@ -15,7 +15,9 @@ class ProductReview(Base):
     rating = Column(Float, nullable=False, default=5.0)
     text = Column(Text, nullable=False)
     avatar = Column(String(10), nullable=True)
+    status = Column(String(20), default="approved", nullable=False, index=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     product = relationship("Product", backref="reviews_list")

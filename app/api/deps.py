@@ -113,6 +113,24 @@ async def get_current_user(
     return user
 
 
+async def get_current_user_optional(
+    access_token: Optional[str] = Cookie(default=None),
+    authorization: Optional[str] = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> Optional[User]:
+    """
+    Attempt to resolve the authenticated user, or return None if unauthenticated.
+    """
+    token = _extract_token(access_token, authorization)
+    if not token:
+        return None
+    try:
+        user_id = await get_current_user_id(access_token=access_token, authorization=authorization)
+        return await UserRepository(db).get_by_id(user_id)
+    except Exception:
+        return None
+
+
 # ==========================================================
 # Role-Based Access Control
 # ==========================================================

@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -29,5 +30,16 @@ class CategoryResponse(CategoryBase):
     id: str
     slug: str
     is_active: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminCategoryResponse(CategoryBase):
+    """Full category response for admin panel, includes audit timestamps."""
+    id: str
+    slug: str
+    is_active: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)

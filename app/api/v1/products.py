@@ -56,9 +56,28 @@ async def list_products(
 ):
     service = ProductService(db)
 
+    clean_cat = None
+    if category and category.lower().strip() != "all":
+        c = category.lower().strip()
+        valid_categories = ["dark", "milk", "white", "gift", "beverage"]
+        if c in valid_categories:
+            clean_cat = c
+        elif "milk" in c:
+            clean_cat = "milk"
+        elif "white" in c:
+            clean_cat = "white"
+        elif "gift" in c or "hamper" in c or "box" in c:
+            clean_cat = "gift"
+        elif "bev" in c:
+            clean_cat = "beverage"
+        elif "dark" in c:
+            clean_cat = "dark"
+        else:
+            clean_cat = c
+
     return await service.list_products(
         search=search,
-        category=category,
+        category=clean_cat,
         price_min=price_min,
         price_max=price_max,
         min_rating=min_rating,
@@ -176,9 +195,23 @@ async def create_product(
     current_user: User = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
-    # Clean category enum
+    # Clean category enum mapping
+    cat_raw = (category or "dark").lower().strip()
     valid_categories = ["dark", "milk", "white", "gift", "beverage"]
-    clean_cat = category.lower().strip() if (category and category.lower().strip() in valid_categories) else "dark"
+    if cat_raw in valid_categories:
+        clean_cat = cat_raw
+    elif "milk" in cat_raw:
+        clean_cat = "milk"
+    elif "white" in cat_raw:
+        clean_cat = "white"
+    elif "gift" in cat_raw or "hamper" in cat_raw or "box" in cat_raw:
+        clean_cat = "gift"
+    elif "bev" in cat_raw:
+        clean_cat = "beverage"
+    elif "dark" in cat_raw:
+        clean_cat = "dark"
+    else:
+        clean_cat = "dark"
 
     # Set badge if flags provided, and sync boolean flags with badge
     clean_badge = badge
@@ -198,21 +231,7 @@ async def create_product(
     elif clean_badge in ("Premium", "Signature", "Gift Hamper", "Gift Hampers"):
         is_featured = True
 
-
-
-    # Upload main image to Cloudinary folder "chocolate-world/products"
-    image_url: Optional[str] = None
-    if image and hasattr(image, "filename") and image.filename:
-        image_url = await cloudinary_service.upload_image(
-            file=image,
-            folder="chocolate-world/products",
-        )
-
-    # Fallback placeholder image if none provided
-    if not image_url:
-        image_url = "https://images.unsplash.com/photo-1548907040-4d42b52115ca?auto=format&fit=crop&w=600&q=80"
-
-    # Upload gallery images if provided
+    # Upload gallery images if provided first
     hover_image_url: Optional[str] = None
     gallery_urls: List[str] = []
     if gallery_images:
@@ -224,6 +243,20 @@ async def create_product(
                     folder="chocolate-world/products",
                 )
                 gallery_urls.append(g_url)
+
+    # Upload main image to Cloudinary folder "chocolate-world/products"
+    image_url: Optional[str] = None
+    if image and hasattr(image, "filename") and image.filename:
+        image_url = await cloudinary_service.upload_image(
+            file=image,
+            folder="chocolate-world/products",
+        )
+    elif gallery_urls:
+        image_url = gallery_urls[0]
+
+    # Fallback placeholder image if none provided
+    if not image_url:
+        image_url = "https://images.unsplash.com/photo-1548907040-4d42b52115ca?auto=format&fit=crop&w=600&q=80"
 
     if gallery_urls:
         hover_image_url = gallery_urls[0]
@@ -281,6 +314,24 @@ async def update_product(
     current_user: User = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
+    if data.category:
+        cat_raw = data.category.lower().strip()
+        valid_categories = ["dark", "milk", "white", "gift", "beverage"]
+        if cat_raw in valid_categories:
+            data.category = cat_raw
+        elif "milk" in cat_raw:
+            data.category = "milk"
+        elif "white" in cat_raw:
+            data.category = "white"
+        elif "gift" in cat_raw or "hamper" in cat_raw or "box" in cat_raw:
+            data.category = "gift"
+        elif "bev" in cat_raw:
+            data.category = "beverage"
+        elif "dark" in cat_raw:
+            data.category = "dark"
+        else:
+            data.category = "dark"
+
     service = ProductService(db)
     product = await service.update_product(product_id, data)
 
@@ -373,6 +424,8 @@ async def delete_product(
 # ======================================================
 # PRODUCT REVIEWS (Public / Customer)
 # ======================================================
+# REVIEWS & RATINGS
+# ======================================================
 
 class CreateReviewRequest(BaseModel):
     author: str
@@ -381,31 +434,33 @@ class CreateReviewRequest(BaseModel):
 
 @router.get(
     "/{product_id}/reviews",
-    response_model=list[ReviewResponse],
-    summary="Get reviews for a product",
+    summary="Get reviews and rating summary for a product",
 )
 async def get_product_reviews(
     product_id: str,
     db: AsyncSession = Depends(get_db),
 ):
     service = CustomerService(db)
-    return await service.get_product_reviews(product_id)
+    return await service.get_product_reviews_with_summary(product_id)
 
 @router.post(
     "/{product_id}/reviews",
-    response_model=ReviewResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Post a review for a product",
+    summary="Post a review for a product (purchased customers only)",
 )
 async def create_product_review(
     product_id: str,
     payload: CreateReviewRequest,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     service = CustomerService(db)
     return await service.create_product_review(
         product_id=product_id,
-        author=payload.author,
+        author=payload.author or current_user.full_name,
         rating=payload.rating,
         text=payload.text,
+        user_id=current_user.id,
+        bypass_purchase_check=False,
     )
+

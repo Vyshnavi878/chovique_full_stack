@@ -1,7 +1,7 @@
 import math
 from typing import Any
 
-from sqlalchemy import func, or_, select, update, delete
+from sqlalchemy import func, or_, select, update, delete, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.product import Product
@@ -34,16 +34,23 @@ class ProductRepository:
         # --- Filters ---
 
         if search:
-            term = f"%{search}%"
+            term = f"%{search.strip()}%"
             query = query.where(
                 or_(
                     Product.name.ilike(term),
                     Product.description.ilike(term),
+                    Product.ingredients.ilike(term),
+                    Product.badge.ilike(term),
+                    cast(Product.category, String).ilike(term),
                 )
             )
 
         if category and category != "all":
-            query = query.where(Product.category == category)
+            valid_enums = ["dark", "milk", "white", "gift", "beverage"]
+            if category in valid_enums:
+                query = query.where(Product.category == category)
+            else:
+                query = query.where(cast(Product.category, String).ilike(f"%{category}%"))
 
         if price_min is not None:
             query = query.where(Product.price >= price_min)

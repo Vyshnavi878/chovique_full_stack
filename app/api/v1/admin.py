@@ -1,7 +1,8 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_role
@@ -31,6 +32,7 @@ from app.schemas.home import BannerResponse, ContactInfoResponse, StatsResponse,
 from app.schemas.order import OrderResponse
 from app.schemas.ticket import SupportTicketResponse
 from app.schemas.user import SystemUserResponse
+from app.schemas.category import AdminCategoryResponse, CategoryUpdate
 from app.services.admin_service import AdminService
 
 logger = logging.getLogger(__name__)
@@ -597,22 +599,35 @@ async def delete_banner(
 # CMS — TESTIMONIALS
 # ======================================================
 
+@router.get(
+    "/testimonials",
+    summary="Get all testimonials for moderation (admin only)",
+)
+async def admin_get_testimonials(
+    status: Optional[str] = Query(default=None),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    return await service.get_all_testimonials(status=status)
+
+
 @router.post(
     "/testimonials",
     response_model=TestimonialResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a new testimonial (admin only)",
+    summary="Create a new customer testimonial (admin only)",
 )
 async def create_testimonial(
     author: str = Form(...),
-    title: Optional[str] = Form(default=None),
+    title: str = Form(default="Chocolate Enthusiast"),
     text: str = Form(...),
     rating: float = Form(default=5.0),
     initials: Optional[str] = Form(default=None),
     avatar_url: Optional[str] = Form(default=None),
-    is_active: bool = Form(default=True),
-    sort_order: int = Form(default=0),
     avatar: UploadFile = File(default=None),
+    sort_order: int = Form(default=0),
+    is_active: bool = Form(default=True),
     current_user: User = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -621,13 +636,84 @@ async def create_testimonial(
         title=title,
         text=text,
         rating=rating,
-        initials=initials,
+        initials=initials or author[:2].upper(),
         avatar_url=avatar_url,
-        is_active=is_active,
         sort_order=sort_order,
+        is_active=is_active,
     )
     service = AdminService(db)
     return await service.create_testimonial(payload, avatar_file=avatar)
+
+
+class UpdateTestimonialStatusPayload(BaseModel):
+    status: str  # approved, rejected, pending
+
+
+@router.patch(
+    "/testimonials/{testimonial_id}/status",
+    summary="Approve, reject, or update testimonial status (admin only)",
+)
+async def update_testimonial_status(
+    testimonial_id: str,
+    payload: UpdateTestimonialStatusPayload,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    updated = await service.update_testimonial_status(testimonial_id, payload.status)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Testimonial not found.")
+    return updated
+
+
+@router.delete(
+    "/testimonials/{testimonial_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a customer testimonial (admin only)",
+)
+async def delete_testimonial(
+    testimonial_id: str,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    success = await service.delete_testimonial(testimonial_id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Testimonial not found.")
+    return None
+
+
+# ======================================================
+# PRODUCT REVIEWS MODERATION (Admin)
+# ======================================================
+
+@router.get(
+    "/reviews",
+    summary="Get all product reviews site-wide (admin only)",
+)
+async def admin_get_all_reviews(
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    return await service.get_all_reviews()
+
+
+@router.delete(
+    "/reviews/{review_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a product review and recalculate product rating (admin only)",
+)
+async def admin_delete_review(
+    review_id: str,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    deleted = await service.delete_review(review_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found.")
+    return None
 
 
 # ======================================================
@@ -841,3 +927,104 @@ async def delete_story_video(
     video_url = await service.delete_story_video()
     return {"video_url": video_url}
 
+
+# ======================================================
+# CATEGORIES (Admin Management)
+# ======================================================
+
+@router.get(
+    "/categories",
+    response_model=list[AdminCategoryResponse],
+    summary="List all categories including inactive (admin only)",
+)
+async def admin_get_all_categories(
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    categories = await service.admin_get_all_categories()
+    return [AdminCategoryResponse.model_validate(c) for c in categories]
+
+
+@router.post(
+    "/categories",
+    response_model=AdminCategoryResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new category with optional image upload (admin only)",
+)
+async def admin_create_category(
+    name: str = Form(...),
+    slug: Optional[str] = Form(default=None),
+    description: Optional[str] = Form(default=None),
+    sort_order: int = Form(default=0),
+    is_active: bool = Form(default=True),
+    image_url: Optional[str] = Form(default=None),
+    image: Optional[UploadFile] = File(default=None),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    import re
+    final_slug = slug or re.sub(r"[^\w\s-]", "", name.lower().strip()).replace(" ", "-")
+    category = await service.admin_create_category(
+        name=name,
+        slug=final_slug,
+        description=description,
+        sort_order=sort_order,
+        is_active=is_active,
+        image_file=image if (image and image.filename) else None,
+        image_url=image_url,
+    )
+    return AdminCategoryResponse.model_validate(category)
+
+
+@router.patch(
+    "/categories/{category_id}",
+    response_model=AdminCategoryResponse,
+    summary="Update a category (admin only)",
+)
+async def admin_update_category(
+    category_id: str,
+    payload: CategoryUpdate,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    update_dict = payload.model_dump(exclude_unset=True)
+    category = await service.admin_update_category(category_id, **update_dict)
+    if not category:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found.")
+    return AdminCategoryResponse.model_validate(category)
+
+
+@router.delete(
+    "/categories/{category_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a category (admin only)",
+)
+async def admin_delete_category(
+    category_id: str,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    deleted = await service.admin_delete_category(category_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found.")
+
+
+@router.post(
+    "/categories/{category_id}/image",
+    summary="Upload or replace category image (admin only)",
+)
+async def admin_upload_category_image(
+    category_id: str,
+    image: UploadFile = File(...),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    new_url = await service.admin_upload_category_image(category_id, image)
+    if not new_url:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found.")
+    return {"image_url": new_url}

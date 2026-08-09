@@ -568,9 +568,32 @@ class CustomerService:
     # ==========================================================
     # Product Reviews
     # ==========================================================
+    # Product Reviews & Purchase Verification
+    # ==========================================================
+
+    async def verify_user_purchased_product(self, user_id: str, product_id: str) -> bool:
+        """
+        Check if user has an order containing product_id with status != 'Cancelled'.
+        """
+        if not user_id:
+            return False
+        from sqlalchemy import func, select
+        from app.models.order import Order, OrderItem
+
+        result = await self.db.execute(
+            select(func.count())
+            .select_from(OrderItem)
+            .join(Order, OrderItem.order_id == Order.id)
+            .where(
+                Order.user_id == user_id,
+                OrderItem.product_id == product_id,
+                Order.status != "Cancelled",
+            )
+        )
+        return (result.scalar() or 0) > 0
 
     async def get_product_reviews(self, product_id: str) -> list[ReviewResponse]:
-        reviews = await self.review_repo.get_product_reviews(product_id)
+        reviews = await self.review_repo.get_product_reviews(product_id, status="approved")
         return [
             ReviewResponse(
                 id=r.id,
@@ -583,6 +606,16 @@ class CustomerService:
             for r in reviews
         ]
 
+    async def get_product_reviews_with_summary(self, product_id: str) -> dict:
+        reviews = await self.get_product_reviews(product_id)
+        summary = await self.review_repo.get_rating_summary(product_id)
+        return {
+            "reviews": reviews,
+            "average_rating": summary["average_rating"],
+            "total_reviews": summary["total_reviews"],
+            "star_breakdown": summary["star_breakdown"],
+        }
+
     async def create_product_review(
         self,
         product_id: str,
@@ -590,10 +623,22 @@ class CustomerService:
         rating: float,
         text: str,
         user_id: str | None = None,
-    ) -> ReviewResponse:
+        bypass_purchase_check: bool = False,
+    ) -> dict:
+
+        # 1. Purchase Verification
+        if user_id and not bypass_purchase_check:
+            purchased = await self.verify_user_purchased_product(user_id, product_id)
+            if not purchased:
+                from fastapi import HTTPException, status
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You can only review products you have purchased."
+                )
 
         initials = "".join([w[0].upper() for w in author.split()[:2]]) if author else "U"
 
+        # 2. Create Review
         review = await self.review_repo.create(
             product_id=product_id,
             user_id=user_id,
@@ -601,13 +646,24 @@ class CustomerService:
             rating=rating,
             text=text,
             avatar=initials,
+            status="approved",
         )
 
-        return ReviewResponse(
-            id=review.id,
-            author=review.author,
-            rating=review.rating,
-            text=review.text,
-            date=review.created_at.strftime("%Y-%m-%d"),
-            avatar=review.avatar,
+        # 3. Recalculate Average Rating & Total Ratings Count for Product
+        summary = await self.review_repo.get_rating_summary(product_id)
+        await self.product_repo.update(
+            product_id,
+            rating=summary["average_rating"],
+            ratings_count=summary["total_reviews"],
         )
+
+        return {
+            "id": review.id,
+            "author": review.author,
+            "rating": review.rating,
+            "text": review.text,
+            "date": review.created_at.strftime("%Y-%m-%d") if review.created_at else datetime.now().strftime("%Y-%m-%d"),
+            "avatar": review.avatar,
+            "summary": summary,
+        }
+

@@ -127,16 +127,37 @@ class HomeService:
         ]
 
     # ==========================================================
-    # Get Testimonials
+    # Get Testimonials (Approved Only for Public Display)
     # ==========================================================
 
     async def get_testimonials(self) -> list[TestimonialResponse]:
-
         testimonials = await self.testimonial_repo.get_active()
-
         return [
             TestimonialResponse.from_orm_model(t) for t in testimonials
         ]
+
+    async def submit_testimonial(
+        self,
+        author: str,
+        text: str,
+        title: str | None = None,
+        rating: float = 5.0,
+        user_id: str | None = None,
+        avatar_url: str | None = None,
+    ) -> TestimonialResponse:
+        initials = "".join([w[0].upper() for w in author.split()[:2]]) if author else "U"
+        testimonial = await self.testimonial_repo.create(
+            user_id=user_id,
+            author=author,
+            title=title or "Chocolate Enthusiast",
+            text=text,
+            rating=rating,
+            initials=initials,
+            avatar_url=avatar_url,
+            status="pending",
+            is_active=False,
+        )
+        return TestimonialResponse.from_orm_model(testimonial)
 
     # ==========================================================
     # Get Theme

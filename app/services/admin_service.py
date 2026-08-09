@@ -18,6 +18,7 @@ from app.models.ticket import SupportTicket
 from app.models.user import User
 from app.repositories.audit_log_repository import AuditLogRepository
 from app.repositories.banner_repository import BannerRepository
+from app.repositories.category_repository import CategoryRepository
 from app.repositories.offline_sale_repository import OfflineSaleRepository
 from app.repositories.order_repository import OrderRepository
 from app.repositories.product_repository import ProductRepository
@@ -69,9 +70,73 @@ class AdminService:
         self.ticket_repo = TicketRepository(db)
         self.offline_sale_repo = OfflineSaleRepository(db)
         self.banner_repo = BannerRepository(db)
+        self.category_repo = CategoryRepository(db)
         self.testimonial_repo = TestimonialRepository(db)
         self.reel_repo = ReelRepository(db)
         self.site_config_repo = SiteConfigRepository(db)
+
+    # ==========================================================
+    # Categories (Admin)
+    # ==========================================================
+
+    async def admin_get_all_categories(self):
+        """Return ALL categories (including inactive) for admin management."""
+        from sqlalchemy import select
+        from app.models.category import Category as CategoryModel
+        result = await self.db.execute(
+            select(CategoryModel).order_by(CategoryModel.sort_order.asc(), CategoryModel.name.asc())
+        )
+        return list(result.scalars().all())
+
+    async def admin_create_category(
+        self,
+        name: str,
+        slug: str,
+        description: str | None = None,
+        sort_order: int = 0,
+        is_active: bool = True,
+        image_file: UploadFile | None = None,
+        image_url: str | None = None,
+    ):
+        """Create a category, optionally uploading image to Cloudinary."""
+        import re
+
+        final_slug = slug or re.sub(r"[^\w\s-]", "", name.lower().strip()).replace(" ", "-")
+        final_image_url: str | None = image_url
+
+        if image_file and image_file.filename:
+            final_image_url = await cloudinary_service.upload_image(
+                image_file, folder="chovique/categories"
+            )
+
+        return await self.category_repo.create(
+            name=name,
+            slug=final_slug,
+            description=description,
+            image_url=final_image_url,
+            sort_order=sort_order,
+            is_active=is_active,
+        )
+
+    async def admin_update_category(self, category_id: str, **kwargs):
+        """Update a category's fields."""
+        return await self.category_repo.update(category_id, **kwargs)
+
+    async def admin_delete_category(self, category_id: str) -> bool:
+        """Delete a category by ID."""
+        return await self.category_repo.delete(category_id)
+
+    async def admin_upload_category_image(self, category_id: str, image_file: UploadFile) -> str:
+        """Upload a new image for a category and update the record."""
+        category = await self.category_repo.get_by_id(category_id)
+        if not category:
+            return ""
+
+        new_url = await cloudinary_service.upload_image(
+            image_file, folder="chovique/categories"
+        )
+        await self.category_repo.update(category_id, image_url=new_url)
+        return new_url
 
     # ==========================================================
     # Dashboard Stats
@@ -652,7 +717,6 @@ class AdminService:
     async def create_banner(
         self,
         payload: CreateBannerRequest,
-    UpdateBannerRequest,
         image_file: Optional[UploadFile] = None,
     ) -> BannerResponse:
         image_url = payload.image
@@ -806,6 +870,47 @@ class AdminService:
         from app.repositories.contact_repository import ContactRepository
         repo = ContactRepository(self.db)
         return await repo.delete(message_id)
+
+    # ==========================================================
+    # Testimonials Moderation (Admin)
+    # ==========================================================
+
+    async def get_all_testimonials(self, status: str | None = None) -> list:
+        return await self.testimonial_repo.get_all_for_admin(status=status)
+
+    async def update_testimonial_status(self, testimonial_id: str, status: str):
+        return await self.testimonial_repo.update_status(testimonial_id, status)
+
+    async def delete_testimonial(self, testimonial_id: str) -> bool:
+        return await self.testimonial_repo.delete(testimonial_id)
+
+    # ==========================================================
+    # Product Reviews Moderation (Admin)
+    # ==========================================================
+
+    async def get_all_reviews(self) -> list:
+        from app.repositories.review_repository import ReviewRepository
+        review_repo = ReviewRepository(self.db)
+        return await review_repo.get_all()
+
+    async def delete_review(self, review_id: str) -> bool:
+        from app.repositories.review_repository import ReviewRepository
+        review_repo = ReviewRepository(self.db)
+        review = await review_repo.get_by_id(review_id)
+        if not review:
+            return False
+
+        product_id = review.product_id
+        deleted = await review_repo.delete(review_id)
+        if deleted:
+            # Recalculate product rating
+            summary = await review_repo.get_rating_summary(product_id)
+            await self.product_repo.update(
+                product_id,
+                rating=summary["average_rating"],
+                ratings_count=summary["total_reviews"],
+            )
+        return deleted
 
     # ==========================================================
     # Our Story Video Upload

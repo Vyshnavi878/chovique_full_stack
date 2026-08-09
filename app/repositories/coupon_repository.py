@@ -2,7 +2,7 @@ import datetime
 from datetime import timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.coupon import Coupon
+from app.models.coupon import Coupon, CouponEligibilityRule, CouponProduct, CouponCategory
 
 
 class CouponRepository:
@@ -68,9 +68,39 @@ class CouponRepository:
         kwargs["code"] = kwargs["code"].upper()
         if "expires_at" in kwargs and kwargs["expires_at"]:
             kwargs["expires_at"] = self._parse_expires_at(kwargs["expires_at"])
-        coupon = Coupon(**kwargs)
+        if "start_at" in kwargs and kwargs["start_at"]:
+            kwargs["start_at"] = self._parse_expires_at(kwargs["start_at"])
+
+        eligibility_rule = kwargs.pop("eligibility_rule", None)
+        eligibility_value = kwargs.pop("eligibility_value", None)
+        applicability = kwargs.pop("applicability", None)
+        applicable_ids = kwargs.pop("applicable_ids", [])
+
+        # Filter kwargs to only columns present on Coupon ORM model
+        valid_kwargs = {k: v for k, v in kwargs.items() if hasattr(Coupon, k)}
+
+        coupon = Coupon(**valid_kwargs)
         self._check_and_deactivate(coupon)
         self.db.add(coupon)
+        await self.db.flush()
+
+        if eligibility_rule and eligibility_rule != "ALL_USERS":
+            rule = CouponEligibilityRule(
+                coupon_id=coupon.id,
+                rule_type=eligibility_rule,
+                rule_value=str(eligibility_value) if eligibility_value else None,
+            )
+            self.db.add(rule)
+
+        if applicability in ("SPECIFIC_PRODUCTS", "PRODUCTS") and applicable_ids:
+            for pid in applicable_ids:
+                if pid:
+                    self.db.add(CouponProduct(coupon_id=coupon.id, product_id=str(pid)))
+        elif applicability in ("SPECIFIC_CATEGORIES", "CATEGORIES") and applicable_ids:
+            for cid in applicable_ids:
+                if cid:
+                    self.db.add(CouponCategory(coupon_id=coupon.id, category_id=str(cid)))
+
         await self.db.commit()
         await self.db.refresh(coupon)
         return coupon
@@ -80,9 +110,16 @@ class CouponRepository:
         if not coupon:
             return None
         
-        if "expires_at" in kwargs:
+        if "expires_at" in kwargs and kwargs["expires_at"]:
             kwargs["expires_at"] = self._parse_expires_at(kwargs["expires_at"])
-            
+        if "start_at" in kwargs and kwargs["start_at"]:
+            kwargs["start_at"] = self._parse_expires_at(kwargs["start_at"])
+
+        kwargs.pop("eligibility_rule", None)
+        kwargs.pop("eligibility_value", None)
+        kwargs.pop("applicability", None)
+        kwargs.pop("applicable_ids", None)
+
         for key, value in kwargs.items():
             if hasattr(coupon, key) and value is not None:
                 setattr(coupon, key, value)
