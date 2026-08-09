@@ -21,6 +21,11 @@ class OrderRepository:
         delivery_option: str,
         payment_method: str,
         items_data: list[dict],
+        coupon_code: str | None = None,
+        coupon_discount: float = 0.0,
+        coins_used: int = 0,
+        coin_discount: float = 0.0,
+        coins_earned: int = 0,
         commit: bool = True,
     ) -> Order:
         order = Order(
@@ -28,6 +33,11 @@ class OrderRepository:
             total=total,
             subtotal=subtotal,
             discount=discount,
+            coupon_code=coupon_code,
+            coupon_discount=coupon_discount,
+            coins_used=coins_used,
+            coin_discount=coin_discount,
+            coins_earned=coins_earned,
             shipping=shipping,
             tax=tax,
             shipping_address=shipping_address,

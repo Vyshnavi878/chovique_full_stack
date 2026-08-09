@@ -14,6 +14,7 @@ class CartRepository:
             select(Cart)
             .options(selectinload(Cart.items).selectinload(CartItem.product))
             .where(Cart.user_id == user_id)
+            .execution_options(populate_existing=True)
         )
         cart = result.scalar_one_or_none()
 
@@ -27,6 +28,7 @@ class CartRepository:
                 select(Cart)
                 .options(selectinload(Cart.items).selectinload(CartItem.product))
                 .where(Cart.id == cart.id)
+                .execution_options(populate_existing=True)
             )
             cart = result.scalar_one_or_none()
 

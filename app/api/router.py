@@ -22,6 +22,7 @@ from app.api.v1 import (
     webhooks,
     wishlist,
     theme,
+    wallet,
 )
 from app.core.config import settings
 
@@ -34,6 +35,7 @@ api_router.include_router(products.router)
 api_router.include_router(categories.router)
 api_router.include_router(cart.router)
 api_router.include_router(wishlist.router)
+api_router.include_router(wallet.router)
 api_router.include_router(checkout.router)
 api_router.include_router(payments.router)
 api_router.include_router(orders.router)

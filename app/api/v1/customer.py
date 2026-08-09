@@ -14,6 +14,7 @@ from app.schemas.user import (
     UserResponse,
 )
 from app.services.customer_service import CustomerService
+from app.services.coupon_service import CouponService
 
 router = APIRouter(prefix="/users/me", tags=["Customer Dashboard"])
 
@@ -138,8 +139,8 @@ async def get_my_coupons(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    service = CustomerService(db)
-    return await service.get_user_coupons(current_user.id)
+    service = CouponService(db)
+    return await service.get_available_coupons(current_user.id)
 
 
 # ======================================================

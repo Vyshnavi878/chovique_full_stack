@@ -34,10 +34,49 @@ from app.schemas.ticket import SupportTicketResponse
 from app.schemas.user import SystemUserResponse
 from app.schemas.category import AdminCategoryResponse, CategoryUpdate
 from app.services.admin_service import AdminService
+from app.schemas.wallet import RewardSettingsSchema, CoinTransactionResponse, AdminCoinAdjustmentPayload
+from app.services.wallet_service import WalletService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["Admin Module"])
+
+
+# ======================================================
+# REWARD SYSTEM MANAGEMENT
+# ======================================================
+
+@router.get("/rewards/settings", response_model=RewardSettingsSchema, summary="Get reward system settings")
+async def get_reward_settings(
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = WalletService(db)
+    return await service.get_reward_settings()
+
+
+@router.put("/rewards/settings", response_model=RewardSettingsSchema, summary="Update reward system settings")
+async def update_reward_settings(
+    payload: RewardSettingsSchema,
+    current_user: User = Depends(require_role("superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = WalletService(db)
+    return await service.update_reward_settings(payload)
+
+
+@router.post("/rewards/adjust", response_model=CoinTransactionResponse, summary="Perform manual admin coin adjustment")
+async def admin_coin_adjustment(
+    payload: AdminCoinAdjustmentPayload,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = WalletService(db)
+    return await service.admin_manual_adjustment(
+        user_id=payload.user_id,
+        coins=payload.coins,
+        reason=payload.reason,
+    )
 
 
 # ======================================================

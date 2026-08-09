@@ -25,8 +25,8 @@ class UserCouponResponse(BaseModel):
     discount_amount: float = 0.0
     maximum_discount_amount: float = 0.0
     minimum_order_amount: float = 0.0
-    start_at: Optional[str] = None
-    expires_at: Optional[str] = None
+    start_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 

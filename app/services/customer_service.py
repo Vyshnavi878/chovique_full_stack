@@ -242,7 +242,21 @@ class CustomerService:
             subtotal = 0.0
             items_data = []
 
-            for item in payload.items:
+            # If payload items are empty, use user's persistent cart items
+            items_to_process = payload.items
+            if not items_to_process:
+                from app.repositories.cart_repository import CartRepository
+                cart_repo = CartRepository(self.db)
+                user_cart = await cart_repo.get_or_create_user_cart(user_id)
+                items_to_process = [
+                    type("CartItemPayload", (), {"product_id": ci.product_id, "quantity": ci.quantity})()
+                    for ci in user_cart.items
+                ]
+
+            if not items_to_process:
+                raise ValueError("Cannot place order with an empty cart.")
+
+            for item in items_to_process:
                 product = await self.product_repo.get_by_id(item.product_id)
                 if not product or not product.is_active:
                     raise ValueError(f"Product '{item.product_id}' is unavailable.")
@@ -258,25 +272,49 @@ class CustomerService:
                     "price": item_price,
                 })
 
-            discount = 0.0
+            # Coupon validation
+            coupon_discount = 0.0
             if payload.coupon_code:
                 from app.services.coupon_service import CouponService
                 c_service = CouponService(self.db)
                 val_res = await c_service.validate_and_calculate_discount(user_id, payload.coupon_code)
                 if val_res.valid:
-                    discount = val_res.calculated_discount
+                    coupon_discount = val_res.calculated_discount
 
+            # Coin redemption validation
+            coins_used = 0
+            coin_discount = 0.0
+            from app.services.wallet_service import WalletService
+            wallet_service = WalletService(self.db)
+
+            if payload.coins_to_use and payload.coins_to_use > 0:
+                redemption_calc = await wallet_service.calculate_redemption(
+                    user_id=user_id,
+                    subtotal=subtotal,
+                    coupon_discount=coupon_discount,
+                    coins_requested=payload.coins_to_use,
+                )
+                coins_used = redemption_calc.allowed_coins
+                coin_discount = redemption_calc.coin_discount
+
+            total_discount = coupon_discount + coin_discount
             shipping = 0.0 if subtotal > 1500 else 99.0
             tax = round(subtotal * 0.05, 2)  # 5% GST
-            total = max(0.0, subtotal - discount + shipping + tax)
+            total = max(0.0, subtotal - total_discount + shipping + tax)
+            total = round(total, 2)
 
             shipping_addr_dict = payload.shipping_address.model_dump()
 
             order = await self.order_repo.create_order(
                 user_id=user_id,
-                total=round(total, 2),
+                total=total,
                 subtotal=round(subtotal, 2),
-                discount=round(discount, 2),
+                discount=round(total_discount, 2),
+                coupon_code=payload.coupon_code if coupon_discount > 0 else None,
+                coupon_discount=round(coupon_discount, 2),
+                coins_used=coins_used,
+                coin_discount=round(coin_discount, 2),
+                coins_earned=0,  # Will be calculated and set below
                 shipping=round(shipping, 2),
                 tax=round(tax, 2),
                 shipping_address=shipping_addr_dict,
@@ -286,7 +324,25 @@ class CustomerService:
                 commit=False,
             )
 
-            if payload.coupon_code and discount > 0:
+            # Deduct redeemed coins from wallet
+            if coins_used > 0:
+                await wallet_service.redeem_coins(
+                    user_id=user_id,
+                    order_id=order.id,
+                    coins=coins_used,
+                    commit=False,
+                )
+
+            # Calculate and credit earned coins for confirmed order
+            coins_earned, _ = await wallet_service.earn_coins(
+                user_id=user_id,
+                order_id=order.id,
+                payable_amount=total,
+                commit=False,
+            )
+            order.coins_earned = coins_earned
+
+            if payload.coupon_code and coupon_discount > 0:
                 from app.models.coupon import CouponUsage
                 coupon = await self.coupon_repo.get_by_code(payload.coupon_code)
                 if coupon:
@@ -294,15 +350,13 @@ class CustomerService:
                         coupon_id=coupon.id,
                         user_id=user_id,
                         order_id=order.id,
-                        discount_amount=discount
+                        discount_amount=coupon_discount
                     ))
 
             # Clean up ordered items from database Cart & Wishlist tables
             try:
                 from app.repositories.cart_repository import CartRepository
                 from app.repositories.wishlist_repository import WishlistRepository
-                from app.integrations.resend import resend_email
-                import asyncio
 
                 cart_repo = CartRepository(self.db)
                 wishlist_repo = WishlistRepository(self.db)
@@ -313,7 +367,7 @@ class CustomerService:
                     await cart_repo.remove_item(user_cart.id, pid, commit=False)
                     await wishlist_repo.remove_item(user_id, pid, commit=False)
                     
-                    # Deduct stock immediately (for Direct Checkout / Mock Payment / COD)
+                    # Deduct stock immediately
                     product = await self.product_repo.get_by_id(pid)
                     if product:
                         new_stock = max(0, product.stock - item_data["quantity"])
@@ -346,12 +400,11 @@ class CustomerService:
                         name=user.full_name,
                         order_id=order.id,
                         total=order.total,
-                        )
                     )
+                )
         except Exception as e:
             logger.error(f"Failed to trigger email for order {order.id}: {e}")
 
-        # The final commit is done automatically by `async with self.db.begin_nested():` and the router dependency
         await self.db.commit()
 
         db_order = await self.order_repo.get_by_id(order.id)
@@ -377,11 +430,23 @@ class CustomerService:
                 raise ValueError("Order cannot be cancelled in its current state.")
 
             order.status = "Cancelled"
-            
+
+            # Refund coins used and reverse coins earned
+            from app.services.wallet_service import WalletService
+            wallet_service = WalletService(self.db)
+            await wallet_service.refund_order_coins(
+                user_id=user_id,
+                order_id=order.id,
+                coins_used=order.coins_used or 0,
+                coins_earned=order.coins_earned or 0,
+                commit=False,
+            )
+
             for item in order.items:
                 await self.inventory_repo.log_change(
                     product_id=item.product_id,
                     change_quantity=item.quantity,
+                    reason=f"Order {order.id} cancelled",
                     notes=f"Order {order.id} cancelled",
                     performed_by=user_id,
                     commit=False
@@ -414,6 +479,11 @@ class CustomerService:
             total=order.total,
             subtotal=order.subtotal,
             discount=order.discount,
+            coupon_code=order.coupon_code,
+            coupon_discount=order.coupon_discount,
+            coins_used=order.coins_used,
+            coin_discount=order.coin_discount,
+            coins_earned=order.coins_earned,
             shipping=order.shipping,
             tax=order.tax,
             date=created_date,

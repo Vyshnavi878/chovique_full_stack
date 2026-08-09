@@ -19,11 +19,12 @@ class OrderItemPayload(BaseModel):
 
 
 class OrderPayload(BaseModel):
-    items: list[OrderItemPayload]
+    items: Optional[list[OrderItemPayload]] = []
     shipping_address: ShippingAddressSchema
     delivery_option: str = "Standard Delivery"
     payment_method: str = "UPI"
     coupon_code: Optional[str] = None
+    coins_to_use: int = 0
 
 
 class CartItemResponse(BaseModel):
@@ -37,6 +38,11 @@ class OrderResponse(BaseModel):
     total: float
     subtotal: float
     discount: float
+    coupon_code: Optional[str] = None
+    coupon_discount: float = 0.0
+    coins_used: int = 0
+    coin_discount: float = 0.0
+    coins_earned: int = 0
     shipping: float
     tax: float = 0.0
     date: str
