@@ -58,7 +58,7 @@ async def get_reward_settings(
 @router.put("/rewards/settings", response_model=RewardSettingsSchema, summary="Update reward system settings")
 async def update_reward_settings(
     payload: RewardSettingsSchema,
-    current_user: User = Depends(require_role("superadmin")),
+    current_user: User = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
     service = WalletService(db)
