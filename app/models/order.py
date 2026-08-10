@@ -36,8 +36,8 @@ class Order(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    user = relationship("User")
-    items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
+    user = relationship("User", lazy="selectin")
+    items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan", lazy="selectin")
 
 
 class OrderItem(Base):
@@ -50,7 +50,7 @@ class OrderItem(Base):
     price = Column(Float, nullable=False)
 
     order = relationship("Order", back_populates="items")
-    product = relationship("Product")
+    product = relationship("Product", lazy="selectin")
 
 
 class OrderSequence(Base):

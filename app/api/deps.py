@@ -135,23 +135,24 @@ async def get_current_user_optional(
 # Role-Based Access Control
 # ==========================================================
 
-def require_role(*allowed_roles: str):
+def require_role(*allowed_roles):
     """
     Dependency factory that returns a dependency requiring
     the current user to have one of the specified roles.
 
-    Usage:
-        @router.post("/admin-only")
-        async def admin_endpoint(
-            user: User = Depends(require_role("admin", "superadmin")),
-        ):
-            ...
+    Accepts single string arguments, lists, tuples, or sets.
     """
+    roles_set = set()
+    for role in allowed_roles:
+        if isinstance(role, (list, tuple, set)):
+            roles_set.update(role)
+        else:
+            roles_set.add(role)
 
     async def _check_role(
         current_user: User = Depends(get_current_user),
     ) -> User:
-        if current_user.role not in allowed_roles:
+        if current_user.role not in roles_set:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You do not have permission to access this resource.",

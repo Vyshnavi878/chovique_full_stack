@@ -333,7 +333,7 @@ async def get_all_users(
     summary="Get all customers",
 )
 async def get_all_customers(
-    current_user: User = Depends(require_role(["admin", "superadmin"])),
+    current_user: User = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
     service = AdminService(db)
@@ -347,7 +347,7 @@ async def get_all_customers(
 )
 async def get_customer_details(
     user_id: str,
-    current_user: User = Depends(require_role(["admin", "superadmin"])),
+    current_user: User = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
     try:

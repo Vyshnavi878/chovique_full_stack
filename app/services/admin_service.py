@@ -512,11 +512,20 @@ class AdminService:
         payment_status: Optional[str] = None,
     ) -> list[OrderResponse]:
         """Get all orders site-wide (admin view), with optional status filters."""
-        query = select(Order)
+        from sqlalchemy.orm import selectinload
+        from sqlalchemy import func
+        from app.models.order import OrderItem
+
+        query = (
+            select(Order)
+            .options(
+                selectinload(Order.items).selectinload(OrderItem.product)
+            )
+        )
         if status and status.upper() != "ALL":
-            query = query.where(Order.status == status)
+            query = query.where(func.lower(Order.status) == status.lower())
         if payment_status and payment_status.upper() != "ALL":
-            query = query.where(Order.payment_status == payment_status.upper())
+            query = query.where(func.lower(Order.payment_status) == payment_status.lower())
         
         query = query.order_by(Order.created_at.desc())
         result = await self.db.execute(query)
@@ -540,11 +549,21 @@ class AdminService:
         return [SystemUserResponse.from_orm_user(u) for u in users]
 
     async def get_customer_details(self, user_id: str) -> CustomerDetailsResponse:
+        from sqlalchemy.orm import selectinload
+        from app.models.order import OrderItem
+
         user = await self.user_repo.get_by_id(user_id)
         if not user or user.role != "customer":
             raise ValueError("Customer not found.")
 
-        result_orders = await self.db.execute(select(Order).where(Order.user_id == user_id).order_by(Order.created_at.desc()))
+        result_orders = await self.db.execute(
+            select(Order)
+            .options(
+                selectinload(Order.items).selectinload(OrderItem.product)
+            )
+            .where(Order.user_id == user_id)
+            .order_by(Order.created_at.desc())
+        )
         orders = result_orders.scalars().all()
         
         result_tickets = await self.db.execute(select(SupportTicket).where(SupportTicket.user_id == user_id).order_by(SupportTicket.created_at.desc()))

@@ -212,8 +212,21 @@ class ProductService:
 
         # Find products in same category, excluding the current one
         result = await self.product_repo.get_all(category=product.category, per_page=limit + 1)
-        related = [p for p in result["items"] if str(p.id) != str(product_id)][:limit]
-        
+        related = [p for p in result["items"] if str(p.id) != str(product_id)]
+
+        # Fallback: if not enough category matches, fill up with other active products
+        if len(related) < limit:
+            all_result = await self.product_repo.get_all(per_page=limit + 5)
+            existing_ids = {str(p.id) for p in related}
+            existing_ids.add(str(product_id))
+            for p in all_result["items"]:
+                if str(p.id) not in existing_ids:
+                    related.append(p)
+                    existing_ids.add(str(p.id))
+                    if len(related) >= limit:
+                        break
+
+        related = related[:limit]
         return [ProductResponse.from_orm_model(p) for p in related]
 
     async def get_recommendations(self, user_id: str | None = None, limit: int = 4) -> list[ProductResponse]:

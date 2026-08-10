@@ -45,13 +45,13 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database tables initialized.")
 
-    # Migrate PostgreSQL product_badge enum if using PostgreSQL
+    # Additional enum & type migrations for PostgreSQL
     try:
         from sqlalchemy import text
         from app.db.session import engine
-        if "postgresql" in engine.dialect.name:
-            async with engine.connect() as conn:
-                autocommit_conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+        async with engine.connect() as conn:
+            autocommit_conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+            if "postgresql" in engine.dialect.name:
                 for val in ["Gift Hamper", "Gift Hampers", "Signature"]:
                     try:
                         await autocommit_conn.execute(text(f"ALTER TYPE product_badge ADD VALUE IF NOT EXISTS '{val}';"))
@@ -61,9 +61,9 @@ async def lifespan(app: FastAPI):
                     await autocommit_conn.execute(text("ALTER TABLE products ALTER COLUMN badge TYPE VARCHAR(50) USING badge::text;"))
                 except Exception:
                     pass
-            logger.info("PostgreSQL product_badge enum updated successfully.")
+            logger.info("Database auto-migrations executed successfully.")
     except Exception as e:
-        logger.warning("PostgreSQL enum migration note: %s", e)
+        logger.warning("Database migration note: %s", e)
 
     # Ensure superadmin, initial banners, testimonials, and products exist
     try:

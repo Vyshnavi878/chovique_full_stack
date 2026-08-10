@@ -38,6 +38,7 @@ from app.models.faq import FAQ  # noqa: F401
 from app.models.audit_log import AuditLog  # noqa: F401
 from app.models.offline_sale import OfflineSale  # noqa: F401
 from app.models.theme import ThemePreset  # noqa: F401
+from app.models.wallet import UserWallet, CoinTransaction  # noqa: F401
 # ==========================================================
 # Create Async Engine
 # ==========================================================
@@ -76,12 +77,31 @@ async def init_db() -> None:
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
         alter_statements = [
+            # Products
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INTEGER NOT NULL DEFAULT 100;",
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_featured BOOLEAN NOT NULL DEFAULT FALSE;",
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_bestseller BOOLEAN NOT NULL DEFAULT FALSE;",
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_new_arrival BOOLEAN NOT NULL DEFAULT FALSE;",
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS images JSON;",
+            # Orders
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) NOT NULL DEFAULT 'PENDING';",
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_url VARCHAR(500);",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS tax DOUBLE PRECISION NOT NULL DEFAULT 0.0;",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping DOUBLE PRECISION NOT NULL DEFAULT 0.0;",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_code VARCHAR(50);",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_discount DOUBLE PRECISION NOT NULL DEFAULT 0.0;",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS coins_used INTEGER NOT NULL DEFAULT 0;",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS coin_discount DOUBLE PRECISION NOT NULL DEFAULT 0.0;",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS coins_earned INTEGER NOT NULL DEFAULT 0;",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_option VARCHAR(100) NOT NULL DEFAULT 'Standard Delivery';",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method VARCHAR(100) NOT NULL DEFAULT 'UPI';",
+            # Product Reviews
+            "ALTER TABLE product_reviews ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'approved';",
+            "ALTER TABLE product_reviews ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP;",
+            # Testimonials
+            "ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS user_id VARCHAR(36);",
+            "ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'approved';",
+            "ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP;",
         ]
         for stmt in alter_statements:
             try:

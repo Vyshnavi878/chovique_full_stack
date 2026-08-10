@@ -182,12 +182,17 @@ async def create_product(
     badge: Optional[str] = Form(default=None),
     sort_order: int = Form(default=0),
     # Nutrition fields
+    nutrition_serving_size: Optional[str] = Form(default=None),
     nutrition_calories: Optional[str] = Form(default=None),
     nutrition_total_fat: Optional[str] = Form(default=None),
     nutrition_saturated_fat: Optional[str] = Form(default=None),
+    nutrition_trans_fat: Optional[str] = Form(default=None),
     nutrition_cholesterol: Optional[str] = Form(default=None),
     nutrition_sodium: Optional[str] = Form(default=None),
     nutrition_total_carb: Optional[str] = Form(default=None),
+    nutrition_dietary_fiber: Optional[str] = Form(default=None),
+    nutrition_total_sugars: Optional[str] = Form(default=None),
+    nutrition_added_sugars: Optional[str] = Form(default=None),
     nutrition_protein: Optional[str] = Form(default=None),
     # Upload files
     image: Optional[UploadFile] = File(default=None),
@@ -264,15 +269,24 @@ async def create_product(
         hover_image_url = image_url
 
     nutrition = None
-    if any([nutrition_calories, nutrition_total_fat, nutrition_saturated_fat,
-            nutrition_cholesterol, nutrition_sodium, nutrition_total_carb, nutrition_protein]):
+    if any([
+        nutrition_serving_size, nutrition_calories, nutrition_total_fat,
+        nutrition_saturated_fat, nutrition_trans_fat, nutrition_cholesterol,
+        nutrition_sodium, nutrition_total_carb, nutrition_dietary_fiber,
+        nutrition_total_sugars, nutrition_added_sugars, nutrition_protein
+    ]):
         nutrition = NutritionInfo(
+            servingSize=nutrition_serving_size or "",
             calories=nutrition_calories or "",
             totalFat=nutrition_total_fat or "",
             saturatedFat=nutrition_saturated_fat or "",
+            transFat=nutrition_trans_fat or "",
             cholesterol=nutrition_cholesterol or "",
             sodium=nutrition_sodium or "",
             totalCarb=nutrition_total_carb or "",
+            dietaryFiber=nutrition_dietary_fiber or "",
+            totalSugars=nutrition_total_sugars or "",
+            addedSugars=nutrition_added_sugars or "",
             protein=nutrition_protein or "",
         )
 

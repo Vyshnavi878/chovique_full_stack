@@ -9,13 +9,18 @@ from pydantic import BaseModel, ConfigDict, Field
 # ==========================================================
 
 class NutritionInfo(BaseModel):
-    calories: str = ""
-    totalFat: str = ""
-    saturatedFat: str = ""
-    cholesterol: str = ""
-    sodium: str = ""
-    totalCarb: str = ""
-    protein: str = ""
+    servingSize: Optional[str] = ""
+    calories: Optional[str] = ""
+    totalFat: Optional[str] = ""
+    saturatedFat: Optional[str] = ""
+    transFat: Optional[str] = ""
+    cholesterol: Optional[str] = ""
+    sodium: Optional[str] = ""
+    totalCarb: Optional[str] = ""
+    dietaryFiber: Optional[str] = ""
+    totalSugars: Optional[str] = ""
+    addedSugars: Optional[str] = ""
+    protein: Optional[str] = ""
 
 
 # ==========================================================
