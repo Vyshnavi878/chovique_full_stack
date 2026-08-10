@@ -65,6 +65,7 @@ class OrderRepository:
         coins_used: int = 0,
         coin_discount: float = 0.0,
         coins_earned: int = 0,
+        payment_status: str = "PENDING",
         commit: bool = True,
     ) -> Order:
         order_id = await self.generate_next_order_id()
@@ -85,6 +86,7 @@ class OrderRepository:
             delivery_option=delivery_option,
             payment_method=payment_method,
             status="Processing",
+            payment_status=payment_status,
         )
         self.db.add(order)
         await self.db.flush()

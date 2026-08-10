@@ -247,6 +247,33 @@ class CustomerService:
     ) -> OrderResponse:
 
         async with self.db.begin_nested():
+            # Validate Shipping Address
+            addr = payload.shipping_address
+            name_clean = (addr.name or "").strip()
+            street_clean = (addr.street or "").strip()
+            city_clean = (addr.city or "").strip()
+            state_clean = (addr.state or "").strip()
+            zip_clean = (addr.zip or "").strip()
+            phone_clean = (addr.phone or "").strip()
+
+            if not name_clean:
+                raise ValueError("Full name is required.")
+            if not street_clean:
+                raise ValueError("Street address is required.")
+            if not city_clean:
+                raise ValueError("City is required.")
+            if not state_clean:
+                raise ValueError("State is required.")
+            if not zip_clean or not zip_clean.isdigit() or len(zip_clean) != 6:
+                raise ValueError("ZIP/PIN code must contain exactly 6 numeric digits.")
+            if not phone_clean or not phone_clean.isdigit() or len(phone_clean) != 10:
+                raise ValueError("Phone number must contain exactly 10 numeric digits.")
+
+            # Validate Payment Method
+            valid_methods = ["Credit Card", "UPI / Google Pay", "Net Banking", "Cash on Delivery"]
+            if not payload.payment_method or payload.payment_method not in valid_methods:
+                raise ValueError("Please select a valid payment option.")
+
             subtotal = 0.0
             items_data = []
 
@@ -286,8 +313,9 @@ class CustomerService:
                 from app.services.coupon_service import CouponService
                 c_service = CouponService(self.db)
                 val_res = await c_service.validate_and_calculate_discount(user_id, payload.coupon_code)
-                if val_res.valid:
-                    coupon_discount = val_res.calculated_discount
+                if not val_res.valid:
+                    raise ValueError(val_res.message or "Invalid, expired, or already used coupon code.")
+                coupon_discount = val_res.calculated_discount
 
             # Coin redemption validation
             coins_used = 0
@@ -302,6 +330,8 @@ class CustomerService:
                     coupon_discount=coupon_discount,
                     coins_requested=payload.coins_to_use,
                 )
+                if redemption_calc.user_balance < payload.coins_to_use:
+                    raise ValueError(f"Insufficient coin balance. Available balance: {redemption_calc.user_balance} coins.")
                 coins_used = redemption_calc.allowed_coins
                 coin_discount = redemption_calc.coin_discount
 
@@ -312,6 +342,12 @@ class CustomerService:
             total = round(total, 2)
 
             shipping_addr_dict = payload.shipping_address.model_dump()
+
+            # Determine payment_status based on payment method
+            # COD: payment not yet collected at order creation → PENDING
+            # Online (Card/UPI/NetBanking): simulated successful → PAID
+            is_cod = payload.payment_method in ("Cash on Delivery", "COD", "Cash On Delivery")
+            initial_payment_status = "PENDING" if is_cod else "PAID"
 
             order = await self.order_repo.create_order(
                 user_id=user_id,
@@ -328,6 +364,7 @@ class CustomerService:
                 shipping_address=shipping_addr_dict,
                 delivery_option=payload.delivery_option,
                 payment_method=payload.payment_method,
+                payment_status=initial_payment_status,
                 items_data=items_data,
                 commit=False,
             )
@@ -530,10 +567,12 @@ class CustomerService:
             tax=order.tax or 0.0,
             date=created_date,
             status=order.status,
+            payment_status=getattr(order, "payment_status", "PENDING") or "PENDING",
             shippingAddress=ship_addr,
             deliveryOption=order.delivery_option or "Standard Delivery",
             paymentMethod=order.payment_method or "UPI",
             invoice_url=getattr(order, "invoice_url", None),
+            user_id=getattr(order, "user_id", None),
         )
 
     # ==========================================================

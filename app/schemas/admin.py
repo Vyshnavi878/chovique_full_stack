@@ -56,7 +56,8 @@ class CustomerDetailsResponse(BaseModel):
 
 
 class UpdateOrderStatusPayload(BaseModel):
-    status: str  # 'Processing', 'Shipped', 'Delivered', 'Cancelled'
+    status: Optional[str] = None      # Fulfillment: Processing / Confirmed / Shipped / Out_For_Delivery / Delivered / Cancelled
+    payment_status: Optional[str] = None  # Payment: PENDING / PAID / FAILED / REFUNDED
 
 
 # OfflineSale schemas

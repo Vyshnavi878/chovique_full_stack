@@ -47,9 +47,11 @@ class OrderResponse(BaseModel):
     tax: float = 0.0
     date: str
     status: str
+    payment_status: str = "PENDING"
     shippingAddress: ShippingAddressSchema
     deliveryOption: str
     paymentMethod: str
     invoice_url: Optional[str] = None
+    user_id: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)

@@ -425,14 +425,65 @@ class AdminService:
         if not order:
             return None
 
-        order.status = payload.status
+        # --- Fulfillment status transition validation ---
+        VALID_ORDER_STATUSES = {
+            "Processing", "Confirmed", "Shipped", "Out_For_Delivery", "Delivered", "Cancelled"
+        }
+        ALLOWED_TRANSITIONS = {
+            "Processing":       {"Confirmed", "Shipped", "Cancelled"},
+            "Confirmed":        {"Shipped", "Cancelled"},
+            "Shipped":          {"Out_For_Delivery", "Delivered"},
+            "Out_For_Delivery": {"Delivered"},
+            "Delivered":        set(),       # Terminal — no further changes
+            "Cancelled":        set(),       # Terminal
+        }
+
+        if payload.status is not None:
+            new_status = payload.status
+            if new_status not in VALID_ORDER_STATUSES:
+                raise ValueError(f"Invalid order status: {new_status}")
+            current = order.status
+            allowed = ALLOWED_TRANSITIONS.get(current, set())
+            if new_status != current and new_status not in allowed:
+                raise ValueError(
+                    f"Cannot transition order from '{current}' to '{new_status}'."
+                )
+            order.status = new_status
+
+        # --- Payment status transition validation ---
+        VALID_PAYMENT_STATUSES = {"PENDING", "PAID", "FAILED", "REFUNDED"}
+        ALLOWED_PAYMENT_TRANSITIONS = {
+            "PENDING":  {"PAID", "FAILED"},
+            "PAID":     {"REFUNDED"},
+            "FAILED":   {"PENDING"},   # Allow retry
+            "REFUNDED": set(),         # Terminal
+        }
+
+        if payload.payment_status is not None:
+            new_ps = payload.payment_status.upper()
+            if new_ps not in VALID_PAYMENT_STATUSES:
+                raise ValueError(f"Invalid payment status: {new_ps}")
+            current_ps = getattr(order, "payment_status", "PENDING") or "PENDING"
+            allowed_ps = ALLOWED_PAYMENT_TRANSITIONS.get(current_ps.upper(), set())
+            if new_ps != current_ps.upper() and new_ps not in allowed_ps:
+                raise ValueError(
+                    f"Cannot transition payment from '{current_ps}' to '{new_ps}'."
+                )
+            order.payment_status = new_ps
+
         await self.db.commit()
+
+        changes = []
+        if payload.status:
+            changes.append(f"order status → {payload.status}")
+        if payload.payment_status:
+            changes.append(f"payment status → {payload.payment_status}")
 
         await self.audit_repo.log(
             action="update_order_status",
             user_id=admin_id,
             resource=f"order:{order_id}",
-            details=f"Order status changed to {payload.status}",
+            details=f"Order updated: {', '.join(changes)}",
         )
 
         user = await self.user_repo.get_by_id(order.user_id)
@@ -455,11 +506,20 @@ class AdminService:
         cs = CustomerService(self.db)
         return cs._format_order_response(order)
 
-    async def get_all_orders(self) -> list[OrderResponse]:
-        """Get all orders site-wide (admin view)."""
-        result = await self.db.execute(
-            select(Order).order_by(Order.created_at.desc())
-        )
+    async def get_all_orders(
+        self,
+        status: Optional[str] = None,
+        payment_status: Optional[str] = None,
+    ) -> list[OrderResponse]:
+        """Get all orders site-wide (admin view), with optional status filters."""
+        query = select(Order)
+        if status and status.upper() != "ALL":
+            query = query.where(Order.status == status)
+        if payment_status and payment_status.upper() != "ALL":
+            query = query.where(Order.payment_status == payment_status.upper())
+        
+        query = query.order_by(Order.created_at.desc())
+        result = await self.db.execute(query)
         orders = result.scalars().all()
         from app.services.customer_service import CustomerService
         cs = CustomerService(self.db)

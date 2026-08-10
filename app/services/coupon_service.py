@@ -25,29 +25,62 @@ class CouponService:
 
         result = []
         for c in coupons:
-            # Check specific user eligibility if configured
+            # 1. Active status check
+            is_active_flag = getattr(c, "is_active", True)
+            if not is_active_flag:
+                continue
+
+            # 2. Start date check
+            if c.start_at:
+                start_dt = c.start_at if c.start_at.tzinfo else c.start_at.replace(tzinfo=timezone.utc)
+                if start_dt > now_utc:
+                    continue
+
+            # 3. Expiry date check
+            if c.expires_at:
+                exp_dt = c.expires_at if c.expires_at.tzinfo else c.expires_at.replace(tzinfo=timezone.utc)
+                if exp_dt <= now_utc:
+                    continue
+
+            # 4. Check specific user eligibility if configured
             if hasattr(c, "eligibility_rule") and c.eligibility_rule == "SPECIFIC_USERS":
                 if c.eligibility_value and str(user_id) not in c.eligibility_value.split(","):
                     continue
 
-            is_active_flag = getattr(c, "is_active", True)
+            # 5. Check per-user usage limit (USED COUPONS MUST NOT APPEAR AGAIN)
+            if c.per_user_usage_limit > 0:
+                user_usage_q = select(func.count(CouponUsage.id)).where(
+                    CouponUsage.coupon_id == c.id,
+                    CouponUsage.user_id == user_id
+                )
+                user_usage = (await self.db.execute(user_usage_q)).scalar() or 0
+                if user_usage >= c.per_user_usage_limit:
+                    continue
 
-            # Start date check
-            start_ok = True
-            if c.start_at:
-                start_dt = c.start_at if c.start_at.tzinfo else c.start_at.replace(tzinfo=timezone.utc)
-                if start_dt > now_utc:
-                    start_ok = False
+            # 6. Check total usage limit
+            if c.usage_limit > 0:
+                total_usage_q = select(func.count(CouponUsage.id)).where(
+                    CouponUsage.coupon_id == c.id
+                )
+                total_usage = (await self.db.execute(total_usage_q)).scalar() or 0
+                if total_usage >= c.usage_limit:
+                    continue
 
-            # Expiry date check
-            expiry_ok = True
-            if c.expires_at:
-                exp_dt = c.expires_at if c.expires_at.tzinfo else c.expires_at.replace(tzinfo=timezone.utc)
-                if exp_dt <= now_utc:
-                    expiry_ok = False
-
-            # Status logic: ACTIVE only when is_active is True AND start_ok AND expiry_ok
-            status_val = "ACTIVE" if (is_active_flag and start_ok and expiry_ok) else "INACTIVE"
+            # 7. Check eligibility rules (e.g. FIRST_ORDER)
+            rules_q = select(CouponEligibilityRule).where(CouponEligibilityRule.coupon_id == c.id)
+            rules = (await self.db.scalars(rules_q)).all()
+            ineligible = False
+            for rule in rules:
+                if rule.rule_type == "FIRST_ORDER":
+                    user_orders_q = select(func.count(Order.id)).where(
+                        Order.user_id == user_id, Order.status != "Cancelled"
+                    )
+                    order_count = (await self.db.execute(user_orders_q)).scalar() or 0
+                    if order_count > 0:
+                        ineligible = True
+                        break
+            if ineligible:
+                continue
 
             resp = UserCouponResponse(
                 id=c.id,
@@ -61,8 +94,8 @@ class CouponService:
                 minimum_order_amount=c.minimum_order_amount or 0.0,
                 start_at=c.start_at,
                 expires_at=c.expires_at,
-                is_active=is_active_flag,
-                status=status_val,
+                is_active=True,
+                status="ACTIVE",
             )
             result.append(resp)
 

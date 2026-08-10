@@ -28,6 +28,7 @@ class Order(Base):
     shipping = Column(Float, default=0.0, nullable=False)
     tax = Column(Float, default=0.0, nullable=False)
     status = Column(String(50), default="Processing", nullable=False)
+    payment_status = Column(String(50), default="PENDING", nullable=False)
     shipping_address = Column(JSON, nullable=False)
     delivery_option = Column(String(100), default="Standard Delivery", nullable=False)
     payment_method = Column(String(100), default="UPI", nullable=False)

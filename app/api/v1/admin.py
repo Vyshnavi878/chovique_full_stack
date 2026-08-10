@@ -283,11 +283,13 @@ async def update_platform_config(
     summary="Get all orders site-wide (admin only)",
 )
 async def get_all_orders(
+    status: Optional[str] = Query(None),
+    payment_status: Optional[str] = Query(None),
     current_user: User = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
     service = AdminService(db)
-    return await service.get_all_orders()
+    return await service.get_all_orders(status=status, payment_status=payment_status)
 
 
 @router.patch(
