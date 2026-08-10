@@ -22,7 +22,7 @@ from app.models.testimonial import Testimonial  # noqa: F401
 from app.models.site_config import SiteConfig  # noqa: F401
 from app.models.address import CustomerAddress  # noqa: F401
 from app.models.coupon import Coupon  # noqa: F401
-from app.models.order import Order, OrderItem  # noqa: F401
+from app.models.order import Order, OrderItem, OrderSequence  # noqa: F401
 from app.models.ticket import SupportTicket  # noqa: F401
 from app.models.notification import Notification  # noqa: F401
 from app.models.contact import ContactMessage  # noqa: F401
@@ -81,6 +81,7 @@ async def init_db() -> None:
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_bestseller BOOLEAN NOT NULL DEFAULT FALSE;",
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_new_arrival BOOLEAN NOT NULL DEFAULT FALSE;",
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS images JSON;",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_url VARCHAR(500);",
         ]
         for stmt in alter_statements:
             try:

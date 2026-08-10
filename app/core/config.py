@@ -80,6 +80,8 @@ class Settings(BaseSettings):
 
     OTP_EXPIRE_SECONDS: int = 300
     MAX_OTP_ATTEMPTS: int = 3
+    MAX_OTP_RESEND_ATTEMPTS: int = 3
+    OTP_RESEND_LOCKOUT_SECONDS: int = 600
 
     # =====================================================
     # Google OAuth

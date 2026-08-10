@@ -133,13 +133,21 @@ class CustomerService:
         user_id: str,
         file: UploadFile,
     ) -> AvatarUploadResponse:
+        user = await self.user_repo.get_by_id(user_id)
+        if user and user.avatar_url:
+            old_public_id = cloudinary_service.extract_public_id(user.avatar_url)
+            if old_public_id:
+                try:
+                    cloudinary_service.delete_media(old_public_id)
+                except Exception as e:
+                    logger.warning("Failed to delete previous Cloudinary avatar '%s' for user %s: %s", old_public_id, user_id, e)
 
         if not file.filename:
             file.filename = f"{user_id}.jpg"
 
         avatar_url = await cloudinary_service.upload_image(
             file=file,
-            folder="avatars",
+            folder="chocolate-world/avatars",
         )
 
         await self.user_repo.update_profile(user_id, avatar_url=avatar_url)
@@ -407,6 +415,21 @@ class CustomerService:
 
         await self.db.commit()
 
+        # Generate & Upload Invoice to Cloudinary
+        try:
+            from app.services.invoice_service import InvoiceService
+            user = await self.user_repo.get_by_id(user_id)
+            user_name = user.full_name if user else "Customer"
+            user_email = user.email if user else ""
+            db_order = await self.order_repo.get_by_id(order.id)
+            if db_order:
+                inv_url = await InvoiceService.generate_and_upload_invoice(db_order, user_name, user_email)
+                if inv_url:
+                    db_order.invoice_url = inv_url
+                    await self.db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to process Cloudinary invoice for order {order.id}: {e}")
+
         db_order = await self.order_repo.get_by_id(order.id)
         return self._format_order_response(db_order or order)
 
@@ -465,13 +488,32 @@ class CustomerService:
 
     def _format_order_response(self, order) -> OrderResponse:
         cart_items = []
-        for item in order.items:
-            product_res = ProductResponse.from_orm_model(item.product)
+        for item in getattr(order, "items", []) or []:
+            if item.product:
+                product_res = ProductResponse.from_orm_model(item.product)
+            else:
+                product_res = ProductResponse(
+                    id=item.product_id or "unknown",
+                    name="Chovique Product",
+                    slug="product",
+                    category="Chocolates",
+                    price=item.price or 0.0,
+                )
             cart_items.append(CartItemResponse(product=product_res, quantity=item.quantity))
 
-        ship_addr = ShippingAddressSchema(**order.shipping_address)
+        if isinstance(order.shipping_address, dict):
+            ship_addr = ShippingAddressSchema(
+                name=order.shipping_address.get("name", ""),
+                street=order.shipping_address.get("street", ""),
+                city=order.shipping_address.get("city", ""),
+                state=order.shipping_address.get("state", ""),
+                zip=str(order.shipping_address.get("zip", "")),
+                phone=str(order.shipping_address.get("phone", "")),
+            )
+        else:
+            ship_addr = ShippingAddressSchema(name="", street="", city="", state="", zip="", phone="")
 
-        created_date = order.created_at.strftime("%Y-%m-%d") if order.created_at else datetime.now().strftime("%Y-%m-%d")
+        created_date = order.created_at.strftime("%Y-%m-%d") if getattr(order, "created_at", None) else datetime.now().strftime("%Y-%m-%d")
 
         return OrderResponse(
             id=order.id,
@@ -480,17 +522,18 @@ class CustomerService:
             subtotal=order.subtotal,
             discount=order.discount,
             coupon_code=order.coupon_code,
-            coupon_discount=order.coupon_discount,
-            coins_used=order.coins_used,
-            coin_discount=order.coin_discount,
-            coins_earned=order.coins_earned,
-            shipping=order.shipping,
-            tax=order.tax,
+            coupon_discount=order.coupon_discount or 0.0,
+            coins_used=order.coins_used or 0,
+            coin_discount=order.coin_discount or 0.0,
+            coins_earned=order.coins_earned or 0,
+            shipping=order.shipping or 0.0,
+            tax=order.tax or 0.0,
             date=created_date,
             status=order.status,
             shippingAddress=ship_addr,
-            deliveryOption=order.delivery_option,
-            paymentMethod=order.payment_method,
+            deliveryOption=order.delivery_option or "Standard Delivery",
+            paymentMethod=order.payment_method or "UPI",
+            invoice_url=getattr(order, "invoice_url", None),
         )
 
     # ==========================================================

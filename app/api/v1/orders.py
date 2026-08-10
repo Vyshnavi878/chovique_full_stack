@@ -60,14 +60,14 @@ async def get_order(
 
 @router.get(
     "/{order_id}/invoice",
-    summary="Get order invoice as HTML",
+    summary="Get order invoice as HTML or Cloudinary redirect",
 )
 async def get_order_invoice(
     order_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from fastapi.responses import HTMLResponse
+    from fastapi.responses import HTMLResponse, RedirectResponse
     from app.services.invoice_service import InvoiceService
     from app.repositories.order_repository import OrderRepository
     
@@ -76,8 +76,20 @@ async def get_order_invoice(
     
     if not order or (order.user_id != current_user.id and current_user.role not in ["admin", "superadmin"]):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
+
+    user_name = current_user.full_name or "Customer"
+    user_email = current_user.email or ""
+
+    if getattr(order, "invoice_url", None) and str(order.invoice_url).startswith("http"):
+        return RedirectResponse(url=order.invoice_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+    cloud_url = await InvoiceService.generate_and_upload_invoice(order, user_name, user_email)
+    if cloud_url:
+        order.invoice_url = cloud_url
+        await db.commit()
+        return RedirectResponse(url=cloud_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
         
-    html = InvoiceService.generate_html_invoice(order, current_user.full_name, current_user.email)
+    html = InvoiceService.generate_html_invoice(order, user_name, user_email)
     return HTMLResponse(content=html)
 
 

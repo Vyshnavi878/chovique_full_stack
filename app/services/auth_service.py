@@ -94,6 +94,7 @@ class AuthService:
         await self.mail_service.send_registration_otp(
             email=request.email,
             otp=otp,
+            name=request.full_name,
         )
 
         logger.info("Registration OTP sent to %s", request.email)
@@ -548,14 +549,7 @@ class AuthService:
         if existing_user and existing_user.is_email_verified:
             raise ValueError("Email already registered.")
 
-        can_resend = await self.otp_service.can_resend(
-            email
-        )
-
-        if not can_resend:
-            raise ValueError(
-                "Please wait before requesting another OTP."
-            )
+        await self.otp_service.check_resend_limit(email, purpose="register")
 
         otp = self.otp_service.generate_otp()
 
@@ -566,13 +560,14 @@ class AuthService:
             purpose="register",
         )
 
-        await self.otp_service.start_resend_cooldown(
-            email
-        )
+        await self.otp_service.record_resend(email, purpose="register")
 
-        await self.mail_service.send_registration_otp(
+        resend_name = existing_user.full_name if existing_user else ""
+
+        await self.mail_service.send_resend_registration_otp(
             email=email,
             otp=otp,
+            name=resend_name,
         )
 
         logger.info("Registration OTP resent to %s", email)
@@ -582,8 +577,6 @@ class AuthService:
             "email": email,
             "expires_in": settings.OTP_EXPIRE_SECONDS,
         }
-
-
 
     # ======================================================
     # FORGOT PASSWORD
@@ -600,48 +593,31 @@ class AuthService:
             email
         )
 
-
         # Don't expose email existence
-
         if not user:
-
             return {
-
                 "message":
                 "If email exists, OTP has been sent.",
-
             }
-
-
 
         otp = self.otp_service.generate_otp()
 
-
         # save_otp automatically resets attempts
         await self.otp_service.save_otp(
-
             email=email,
-
             otp=otp,
-
             purpose="forgot",
-
         )
-
 
         await self.mail_service.send_forgot_password_otp(
             email=email,
             otp=otp,
+            name=user.full_name,
         )
 
         logger.info("Forgot password OTP sent to %s", email)
 
         return {"message": "If email exists, OTP has been sent."}
-
-
-
-
-
 
     # ======================================================
     # RESEND FORGOT PASSWORD OTP
@@ -655,14 +631,7 @@ class AuthService:
 
         logger.info("Resend forgot password OTP request for email=%s", email)
 
-        can_resend = await self.otp_service.can_resend(
-            email
-        )
-
-        if not can_resend:
-            raise ValueError(
-                "Please wait before requesting another OTP."
-            )
+        await self.otp_service.check_resend_limit(email, purpose="forgot")
 
         user = await self.user_repo.get_by_email(email)
 
@@ -681,13 +650,13 @@ class AuthService:
             purpose="forgot",
         )
 
-        await self.otp_service.start_resend_cooldown(
-            email
-        )
+        await self.otp_service.record_resend(email, purpose="forgot")
 
         await self.mail_service.send_forgot_password_otp(
             email=email,
             otp=otp,
+            name=user.full_name,
+            is_resend=True,
         )
 
         logger.info("Forgot password OTP resent to %s", email)

@@ -173,9 +173,31 @@ class ProductService:
         if not existing:
             return False
 
+        # Delete all associated Cloudinary images before removing from DB
+        from app.services.cloudinary_service import cloudinary_service
+
+        images_to_delete: list[str] = []
+
+        if existing.image:
+            images_to_delete.append(existing.image)
+        if existing.hover_image and existing.hover_image not in images_to_delete:
+            images_to_delete.append(existing.hover_image)
+        if existing.images:
+            for img_url in existing.images:
+                if img_url and img_url not in images_to_delete:
+                    images_to_delete.append(img_url)
+
+        for url in images_to_delete:
+            public_id = cloudinary_service.extract_public_id(url)
+            if public_id:
+                try:
+                    cloudinary_service.delete_media(public_id)
+                except Exception as e:
+                    logger.warning("Failed to delete Cloudinary image '%s' for product %s: %s", public_id, product_id, e)
+
         await self.product_repo.delete(product_id)
 
-        logger.info("Product deleted: id=%s", product_id)
+        logger.info("Product deleted: id=%s (Cloudinary images cleaned up: %d)", product_id, len(images_to_delete))
 
         return True
 

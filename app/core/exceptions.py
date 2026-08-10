@@ -54,7 +54,7 @@ class MaxAttemptsExceededError(OTPError):
 
     def __init__(self):
         super().__init__(
-            message="Maximum OTP verification attempts exceeded. Please request a new OTP.",
+            message="You have reached the maximum number of OTP verification attempts. Please try again later.",
             remaining_attempts=0,
         )
 

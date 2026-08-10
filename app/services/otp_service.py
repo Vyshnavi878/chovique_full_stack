@@ -235,15 +235,73 @@ class OTPService:
 
         await redis_client.delete(key)
 
+    REGISTER_PREFIX = "otp:register:"
+    FORGOT_PREFIX = "otp:forgot:"
+    ATTEMPT_PREFIX = "otp:attempt:"
+    RESEND_PREFIX = "otp:resend:"
+    RESEND_COUNT_PREFIX = "otp:resend_count:"
+    RESEND_LOCK_PREFIX = "otp:resend_lock:"
+
     # ======================================================
-    # Resend Cooldown
+    # Resend Limits & Cooldown
     # ======================================================
+
+    @staticmethod
+    async def check_resend_limit(email: str, purpose: str = "") -> None:
+        """
+        Check if the email has hit resend rate limit or lockout.
+        Raises HTTPException(429) if locked or in cooldown.
+        """
+        from fastapi import HTTPException, status
+
+        # Check 1: Check lockout key
+        lock_key = f"{OTPService.RESEND_LOCK_PREFIX}{purpose}:{email}"
+        lock_ttl = await redis_client.ttl(lock_key)
+
+        if lock_ttl > 0:
+            minutes = max(1, (lock_ttl + 59) // 60)
+            if minutes > 1:
+                detail = f"You have reached the maximum OTP resend limit. Please try again after {minutes} minutes."
+            else:
+                detail = "You have reached the maximum OTP resend limit. Please try again after 1 minute."
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=detail,
+            )
+
+        # Check 2: Check short cooldown key (60 seconds)
+        resend_key = f"{OTPService.RESEND_PREFIX}{purpose}:{email}"
+        cooldown_ttl = await redis_client.ttl(resend_key)
+        if cooldown_ttl > 0:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Please wait {cooldown_ttl} seconds before requesting another OTP.",
+            )
+
+    @staticmethod
+    async def record_resend(email: str, purpose: str = "") -> None:
+        """
+        Record an OTP resend action. Sets 60s cooldown and tracks resend count.
+        If resend count >= MAX_OTP_RESEND_ATTEMPTS, sets lockout key for OTP_RESEND_LOCKOUT_SECONDS.
+        """
+        count_key = f"{OTPService.RESEND_COUNT_PREFIX}{purpose}:{email}"
+        resend_key = f"{OTPService.RESEND_PREFIX}{purpose}:{email}"
+        lock_key = f"{OTPService.RESEND_LOCK_PREFIX}{purpose}:{email}"
+
+        resend_count = await redis_client.incr(count_key)
+        if resend_count == 1:
+            await redis_client.expire(count_key, settings.OTP_RESEND_LOCKOUT_SECONDS)
+
+        await redis_client.setex(resend_key, 60, "1")
+
+        if resend_count >= settings.MAX_OTP_RESEND_ATTEMPTS:
+            await redis_client.setex(lock_key, settings.OTP_RESEND_LOCKOUT_SECONDS, "1")
 
     @staticmethod
     async def start_resend_cooldown(email: str):
 
         await redis_client.setex(
-            f"{OTPService.RESEND_PREFIX}{email}",
+            f"{OTPService.RESEND_PREFIX}:{email}",
             60,
             "1",
         )
@@ -252,7 +310,7 @@ class OTPService:
     async def can_resend(email: str) -> bool:
 
         value = await redis_client.get(
-            f"{OTPService.RESEND_PREFIX}{email}"
+            f"{OTPService.RESEND_PREFIX}:{email}"
         )
 
         return value is None

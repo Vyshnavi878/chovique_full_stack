@@ -20,22 +20,53 @@ class CouponService:
         self.order_repo = OrderRepository(db)
 
     async def get_available_coupons(self, user_id: str) -> list[UserCouponResponse]:
-        # Simple implementation: get all active coupons
-        # In a real scenario, this would filter by eligibility rules
-        coupons = await self.coupon_repo.get_active_coupons()
+        coupons = await self.coupon_repo.get_all()
         now_utc = datetime.now(timezone.utc)
-        
-        available = []
+
+        result = []
         for c in coupons:
-            if c.start_at and c.start_at > now_utc:
-                continue
-            if c.expires_at and c.expires_at <= now_utc:
-                continue
-                
-            # Could check usage limits here
-            available.append(UserCouponResponse.model_validate(c))
-            
-        return available
+            # Check specific user eligibility if configured
+            if hasattr(c, "eligibility_rule") and c.eligibility_rule == "SPECIFIC_USERS":
+                if c.eligibility_value and str(user_id) not in c.eligibility_value.split(","):
+                    continue
+
+            is_active_flag = getattr(c, "is_active", True)
+
+            # Start date check
+            start_ok = True
+            if c.start_at:
+                start_dt = c.start_at if c.start_at.tzinfo else c.start_at.replace(tzinfo=timezone.utc)
+                if start_dt > now_utc:
+                    start_ok = False
+
+            # Expiry date check
+            expiry_ok = True
+            if c.expires_at:
+                exp_dt = c.expires_at if c.expires_at.tzinfo else c.expires_at.replace(tzinfo=timezone.utc)
+                if exp_dt <= now_utc:
+                    expiry_ok = False
+
+            # Status logic: ACTIVE only when is_active is True AND start_ok AND expiry_ok
+            status_val = "ACTIVE" if (is_active_flag and start_ok and expiry_ok) else "INACTIVE"
+
+            resp = UserCouponResponse(
+                id=c.id,
+                code=c.code,
+                name=c.name or c.code,
+                description=c.description or "",
+                discount_type=c.discount_type or "PERCENTAGE",
+                discount_percent=c.discount_percent or 0.0,
+                discount_amount=c.discount_amount or 0.0,
+                maximum_discount_amount=c.maximum_discount_amount or 0.0,
+                minimum_order_amount=c.minimum_order_amount or 0.0,
+                start_at=c.start_at,
+                expires_at=c.expires_at,
+                is_active=is_active_flag,
+                status=status_val,
+            )
+            result.append(resp)
+
+        return result
 
     async def validate_and_calculate_discount(self, user_id: str, code: str) -> CouponValidationResponse:
         coupon = await self.coupon_repo.get_by_code(code)

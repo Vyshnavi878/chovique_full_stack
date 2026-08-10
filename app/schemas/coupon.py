@@ -1,5 +1,5 @@
 from typing import Optional, List
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from datetime import datetime
 
 class CouponValidationRequest(BaseModel):
@@ -17,9 +17,10 @@ class CouponValidationResponse(BaseModel):
 
 
 class UserCouponResponse(BaseModel):
+    id: Optional[str] = None
     code: str
     name: Optional[str] = None
-    description: str
+    description: str = ""
     discount_type: str = "PERCENTAGE"
     discount_percent: float = 0.0
     discount_amount: float = 0.0
@@ -27,6 +28,8 @@ class UserCouponResponse(BaseModel):
     minimum_order_amount: float = 0.0
     start_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
+    is_active: bool = True
+    status: str = "ACTIVE"
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -41,16 +44,23 @@ class CouponCreate(BaseModel):
     maximum_discount_amount: float = 0.0
     minimum_order_amount: float = 0.0
     start_at: Optional[str] = None
-    expires_at: Optional[str] = None
+    expires_at: str  # Required — coupon must have an expiry date
     usage_limit: int = 0
     per_user_usage_limit: int = 1
     is_active: bool = True
-    
+
     eligibility_rule: str = "ALL_USERS"
     eligibility_value: Optional[str] = None
-    
+
     applicability: str = "ENTIRE_STORE"
     applicable_ids: List[str] = []
+
+    @field_validator("expires_at")
+    @classmethod
+    def expires_at_must_not_be_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Expiry date is required and cannot be empty.")
+        return v
 
 
 class CouponUpdate(BaseModel):

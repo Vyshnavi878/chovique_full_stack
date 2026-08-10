@@ -141,13 +141,9 @@ window.onload = function() {{
     return HTMLResponse(html)
 
 import os
-from fastapi.staticfiles import StaticFiles
 from app.middleware.csrf_middleware import CSRFMiddleware
 from app.middleware.audit import AuditLogMiddleware
 from app.middleware.logging_middleware import LoggingMiddleware
-
-os.makedirs("static", exist_ok=True)
-app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # NOTE: Middleware runs in REVERSE order of registration.
 # CORS must be added LAST so it executes FIRST (outermost layer),

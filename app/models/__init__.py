@@ -9,7 +9,7 @@ from app.models.faq import FAQ
 from app.models.inventory import InventoryLog
 from app.models.notification import Notification
 from app.models.offline_sale import OfflineSale
-from app.models.order import Order, OrderItem
+from app.models.order import Order, OrderItem, OrderSequence
 from app.models.payment import Payment
 from app.models.product import Product
 from app.models.reel import InstagramReel

@@ -1,4 +1,5 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
+import re
 
 from app.schemas.user import UserResponse
 
@@ -7,11 +8,30 @@ from app.schemas.user import UserResponse
 # Register
 # ==========================================================
 
+PASSWORD_POLICY_ERROR = (
+    "Password must be at least 8 characters and include at least one uppercase letter, "
+    "one lowercase letter, one number, and one special character."
+)
+
+
 class RegisterRequest(BaseModel):
     full_name: str = Field(..., min_length=2, max_length=120)
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=128)
     confirm_password: str
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if (
+            len(v) < 8
+            or not re.search(r"[A-Z]", v)
+            or not re.search(r"[a-z]", v)
+            or not re.search(r"[0-9]", v)
+            or not re.search(r"[^A-Za-z0-9]", v)
+        ):
+            raise ValueError(PASSWORD_POLICY_ERROR)
+        return v
 
 
 # ==========================================================

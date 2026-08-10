@@ -116,6 +116,35 @@ class CloudinaryService:
                 detail=f"Failed to upload video to Cloudinary: {str(e)}",
             )
 
+    async def upload_bytes(
+        self,
+        file_bytes: bytes,
+        filename: str,
+        folder: str = "chocolate-world/invoices",
+        resource_type: str = "raw",
+    ) -> str:
+        """
+        Upload raw file bytes (e.g., HTML/PDF invoice) to Cloudinary.
+        Returns secure_url.
+        """
+        try:
+            res = cloudinary.uploader.upload(
+                io.BytesIO(file_bytes),
+                folder=folder,
+                public_id=filename,
+                resource_type=resource_type,
+                overwrite=True,
+            )
+            secure_url = res.get("secure_url") or res.get("url")
+            if not secure_url:
+                raise ValueError("Cloudinary response missing URL.")
+            logger.info("Uploaded invoice to Cloudinary folder '%s': %s", folder, secure_url)
+            return secure_url
+        except Exception as e:
+            logger.error("Cloudinary bytes upload failed: %s", e)
+            raise e
+
+
     def delete_media(self, public_id: str, resource_type: str = "image") -> bool:
         """Delete media asset from Cloudinary by public ID."""
         try:

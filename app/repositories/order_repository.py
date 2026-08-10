@@ -1,13 +1,52 @@
+import re
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from app.models.order import Order, OrderItem
+from app.models.order import Order, OrderItem, OrderSequence
 
 
 class OrderRepository:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def generate_next_order_id(self) -> str:
+        """
+        Generate atomic, sequential order IDs in the format ORD-00001-D001.
+        Uses row locking on OrderSequence (with_for_update) for thread and process concurrency safety.
+        """
+        stmt = select(OrderSequence).where(OrderSequence.id == 1).with_for_update()
+        result = await self.db.execute(stmt)
+        seq_row = result.scalar_one_or_none()
+
+        if seq_row is None:
+            # Initialize from existing orders in database
+            order_stmt = select(Order.id)
+            order_res = await self.db.execute(order_stmt)
+            existing_ids = order_res.scalars().all()
+
+            max_seq = 0
+            for oid in existing_ids:
+                match = re.search(r"ORD-(\d+)", str(oid))
+                if match:
+                    try:
+                        val = int(match.group(1))
+                        if val > max_seq:
+                            max_seq = val
+                    except ValueError:
+                        pass
+
+            seq_row = OrderSequence(id=1, current_seq=max_seq)
+            self.db.add(seq_row)
+            await self.db.flush()
+
+        seq_row.current_seq += 1
+        next_seq = seq_row.current_seq
+        await self.db.flush()
+
+        seq_5digit = f"{next_seq:05d}"
+        seq_3digit = f"{(next_seq % 1000):03d}"
+        return f"ORD-{seq_5digit}-D{seq_3digit}"
 
     async def create_order(
         self,
@@ -28,7 +67,9 @@ class OrderRepository:
         coins_earned: int = 0,
         commit: bool = True,
     ) -> Order:
+        order_id = await self.generate_next_order_id()
         order = Order(
+            id=order_id,
             user_id=user_id,
             total=total,
             subtotal=subtotal,

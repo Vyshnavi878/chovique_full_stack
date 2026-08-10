@@ -50,5 +50,6 @@ class OrderResponse(BaseModel):
     shippingAddress: ShippingAddressSchema
     deliveryOption: str
     paymentMethod: str
+    invoice_url: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)

@@ -317,8 +317,64 @@ class AdminService:
 
     async def get_coupons(self):
         from app.repositories.coupon_repository import CouponRepository
+        from app.models.coupon import CouponUsage
+        from app.schemas.coupon import CouponAdminResponse
+        from sqlalchemy import func
+
         coupon_repo = CouponRepository(self.db)
-        return await coupon_repo.get_all()
+        coupons = await coupon_repo.get_all()
+
+        # Build a map of coupon_id -> usage_count from CouponUsage in a single query
+        usage_counts_q = (
+            select(CouponUsage.coupon_id, func.count(CouponUsage.id).label("cnt"))
+            .group_by(CouponUsage.coupon_id)
+        )
+        usage_rows = (await self.db.execute(usage_counts_q)).all()
+        usage_map = {row.coupon_id: row.cnt for row in usage_rows}
+
+        results = []
+        for c in coupons:
+            # Resolve eligibility rule and applicability from related objects
+            eligibility_rule = "ALL_USERS"
+            eligibility_value = None
+            if c.rules:
+                rule = c.rules[0]
+                eligibility_rule = rule.rule_type
+                eligibility_value = rule.rule_value
+
+            applicability = "ENTIRE_STORE"
+            applicable_ids: list[str] = []
+            if c.products:
+                applicability = "SPECIFIC_PRODUCTS"
+                applicable_ids = [cp.product_id for cp in c.products]
+            elif c.categories:
+                applicability = "SPECIFIC_CATEGORIES"
+                applicable_ids = [cc.category_id for cc in c.categories]
+
+            results.append(CouponAdminResponse(
+                id=c.id,
+                code=c.code,
+                name=c.name,
+                description=c.description,
+                discount_type=c.discount_type,
+                discount_percent=c.discount_percent,
+                discount_amount=c.discount_amount,
+                maximum_discount_amount=c.maximum_discount_amount,
+                minimum_order_amount=c.minimum_order_amount,
+                start_at=c.start_at,
+                expires_at=c.expires_at,
+                usage_limit=c.usage_limit,
+                per_user_usage_limit=c.per_user_usage_limit,
+                is_active=c.is_active,
+                created_at=c.created_at,
+                eligibility_rule=eligibility_rule,
+                eligibility_value=eligibility_value,
+                applicability=applicability,
+                applicable_ids=applicable_ids,
+                usage_count=usage_map.get(c.id, 0),
+            ))
+
+        return results
 
     async def create_coupon(self, data):
         from app.repositories.coupon_repository import CouponRepository
@@ -478,6 +534,14 @@ class AdminService:
         user = await self.user_repo.get_by_id(user_id)
         if not user:
             return False
+
+        if getattr(user, "avatar_url", None):
+            public_id = cloudinary_service.extract_public_id(user.avatar_url)
+            if public_id:
+                try:
+                    cloudinary_service.delete_media(public_id)
+                except Exception as e:
+                    logger.warning("Failed to delete Cloudinary avatar '%s' for user %s: %s", public_id, user_id, e)
 
         await self.db.delete(user)
         await self.db.commit()

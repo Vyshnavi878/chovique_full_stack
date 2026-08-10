@@ -31,6 +31,7 @@ class Order(Base):
     shipping_address = Column(JSON, nullable=False)
     delivery_option = Column(String(100), default="Standard Delivery", nullable=False)
     payment_method = Column(String(100), default="UPI", nullable=False)
+    invoice_url = Column(String(500), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
@@ -49,3 +50,11 @@ class OrderItem(Base):
 
     order = relationship("Order", back_populates="items")
     product = relationship("Product")
+
+
+class OrderSequence(Base):
+    __tablename__ = "order_sequences"
+
+    id = Column(Integer, primary_key=True, default=1)
+    current_seq = Column(Integer, nullable=False, default=0)
+
