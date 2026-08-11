@@ -98,7 +98,6 @@ class UserResponse(BaseModel):
 # ==========================================================
 
 class PermissionsSchema(BaseModel):
-    manageInventory: bool = False
     viewAnalytics: bool = False
     manageUsers: bool = False
     configureThemes: bool = False
@@ -126,7 +125,6 @@ class SystemUserResponse(BaseModel):
             email=user.email or "",
             role=role,
             permissions=PermissionsSchema(
-                manageInventory=is_admin,
                 viewAnalytics=is_admin,
                 manageUsers=is_superadmin,
                 configureThemes=is_superadmin,

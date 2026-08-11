@@ -55,11 +55,32 @@ class CouponCreate(BaseModel):
     applicability: str = "ENTIRE_STORE"
     applicable_ids: List[str] = []
 
+    @field_validator("code")
+    @classmethod
+    def code_must_not_be_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Coupon code is required and cannot be empty.")
+        return v.strip().upper()
+
     @field_validator("expires_at")
     @classmethod
     def expires_at_must_not_be_empty(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError("Expiry date is required and cannot be empty.")
+        return v
+
+    @field_validator("discount_percent")
+    @classmethod
+    def validate_discount_percent(cls, v: float) -> float:
+        if v < 0 or v > 100:
+            raise ValueError("Discount percentage must be between 0 and 100.")
+        return v
+
+    @field_validator("minimum_order_amount")
+    @classmethod
+    def validate_minimum_order(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("Minimum order amount cannot be negative.")
         return v
 
 

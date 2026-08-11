@@ -4,7 +4,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.razorpay import razorpay_client
 from app.integrations.resend import resend_email
-from app.repositories.inventory_repository import InventoryRepository
 from app.repositories.order_repository import OrderRepository
 from app.repositories.payment_repository import PaymentRepository
 from app.repositories.product_repository import ProductRepository
@@ -23,7 +22,6 @@ class RefundService:
         self.order_repo = OrderRepository(db)
         self.payment_repo = PaymentRepository(db)
         self.product_repo = ProductRepository(db)
-        self.inventory_repo = InventoryRepository(db)
         self.user_repo = UserRepository(db)
 
     async def initiate_refund(

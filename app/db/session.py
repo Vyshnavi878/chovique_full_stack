@@ -33,7 +33,6 @@ from app.models.cart import Cart, CartItem  # noqa: F401
 from app.models.wishlist import WishlistItem  # noqa: F401
 from app.models.payment import Payment  # noqa: F401
 from app.models.refund import Refund  # noqa: F401
-from app.models.inventory import InventoryLog  # noqa: F401
 from app.models.faq import FAQ  # noqa: F401
 from app.models.audit_log import AuditLog  # noqa: F401
 from app.models.offline_sale import OfflineSale  # noqa: F401
@@ -78,6 +77,7 @@ async def init_db() -> None:
         await connection.run_sync(Base.metadata.create_all)
         alter_statements = [
             # Products
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS sku VARCHAR(50);",
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INTEGER NOT NULL DEFAULT 100;",
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_featured BOOLEAN NOT NULL DEFAULT FALSE;",
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_bestseller BOOLEAN NOT NULL DEFAULT FALSE;",
@@ -98,10 +98,15 @@ async def init_db() -> None:
             # Product Reviews
             "ALTER TABLE product_reviews ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'approved';",
             "ALTER TABLE product_reviews ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP;",
+            # Categories
+            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;",
+            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;",
             # Testimonials
             "ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS user_id VARCHAR(36);",
             "ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'approved';",
             "ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP;",
+            # Cleanup removed Inventory module table
+            "DROP TABLE IF EXISTS inventory_logs CASCADE;",
         ]
         for stmt in alter_statements:
             try:

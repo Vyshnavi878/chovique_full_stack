@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     admin,
+    admin_dashboard,
     auth,
     cart,
     categories,
@@ -12,7 +13,6 @@ from app.api.v1 import (
     coupons,
     customer,
     home,
-    inventory,
     orders,
     payments,
     products,
@@ -43,7 +43,7 @@ api_router.include_router(webhooks.router)
 api_router.include_router(refunds.router)
 api_router.include_router(tickets.router)
 api_router.include_router(coupons.router)
-api_router.include_router(inventory.router)
 api_router.include_router(contact.router)
 api_router.include_router(admin.router)
+api_router.include_router(admin_dashboard.router)
 api_router.include_router(theme.router, prefix="/theme", tags=["Theme Builder"])

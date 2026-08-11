@@ -42,6 +42,7 @@ class ReviewResponse(BaseModel):
 
 class ProductResponse(BaseModel):
     id: str
+    sku: Optional[str] = None
     name: str
     slug: str
     category: str
@@ -89,6 +90,7 @@ class ProductResponse(BaseModel):
 
         return cls(
             id=product.id,
+            sku=getattr(product, "sku", None),
             name=product.name,
             slug=product.slug,
             category=product.category,
@@ -118,6 +120,7 @@ class ProductResponse(BaseModel):
 
 class ProductCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
+    sku: Optional[str] = None
     category: str
     price: float = Field(..., gt=0)
     original_price: Optional[float] = None

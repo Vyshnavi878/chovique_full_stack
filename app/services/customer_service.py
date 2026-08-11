@@ -11,7 +11,6 @@ from app.models.user import User
 from app.repositories.address_repository import AddressRepository
 from app.repositories.contact_repository import ContactRepository
 from app.repositories.coupon_repository import CouponRepository
-from app.repositories.inventory_repository import InventoryRepository
 from app.repositories.notification_repository import NotificationRepository
 from app.repositories.order_repository import OrderRepository
 from app.repositories.product_repository import ProductRepository
@@ -45,7 +44,6 @@ class CustomerService:
         self.user_repo = UserRepository(db)
         self.address_repo = AddressRepository(db)
         self.coupon_repo = CouponRepository(db)
-        self.inventory_repo = InventoryRepository(db)
         self.order_repo = OrderRepository(db)
         self.ticket_repo = TicketRepository(db)
         self.notification_repo = NotificationRepository(db)
@@ -417,17 +415,6 @@ class CustomerService:
                     if product:
                         new_stock = max(0, product.stock - item_data["quantity"])
                         await self.product_repo.update(product.id, stock=new_stock, commit=False)
-                        
-                        from app.repositories.inventory_repository import InventoryRepository
-                        inventory_repo = InventoryRepository(self.db)
-                        await inventory_repo.log_change(
-                            product_id=product.id,
-                            change_quantity=-item_data["quantity"],
-                            reason=f"Customer order placed: {order.id}",
-                            notes=f"Stock updated to {new_stock}",
-                            performed_by=user_id,
-                            commit=False,
-                        )
 
             except Exception as ex:
                 logger.error(f"Error during post-checkout cleanup: {ex}")
@@ -503,14 +490,6 @@ class CustomerService:
             )
 
             for item in order.items:
-                await self.inventory_repo.log_change(
-                    product_id=item.product_id,
-                    change_quantity=item.quantity,
-                    reason=f"Order {order.id} cancelled",
-                    notes=f"Order {order.id} cancelled",
-                    performed_by=user_id,
-                    commit=False
-                )
                 if item.product:
                     await self.product_repo.update(
                         item.product_id,

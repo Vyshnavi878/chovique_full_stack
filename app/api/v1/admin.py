@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, require_role
 from app.models.user import User
 from app.schemas.admin import (
+    AdminOrderListResponse,
     AuditLogEntry,
     BannerImageResponse,
     CreateAdminRequest,
@@ -16,9 +17,11 @@ from app.schemas.admin import (
     CreateReelRequest,
     CreateTestimonialRequest,
     DashboardStatsResponse,
+    FulfillmentStatusPayload,
     ImportSalesResponse,
     OfflineSalePayload,
     OfflineSaleResponse,
+    PaymentStatusPayload,
     ReelResponse,
     ResolveTicketPayload,
     SetContactRequest,
@@ -27,6 +30,9 @@ from app.schemas.admin import (
     UpdateAdminRequest,
     UpdateOrderStatusPayload,
     CustomerDetailsResponse,
+    CustomerUpdatePayload,
+    CustomerListPaginatedResponse,
+    CustomerCoinsResponse,
 )
 from app.schemas.home import BannerResponse, ContactInfoResponse, StatsResponse, TestimonialResponse
 from app.schemas.order import OrderResponse
@@ -97,17 +103,27 @@ async def get_audit_logs(
     return await service.get_audit_logs(limit=limit)
 
 
+from datetime import date
+
 @router.get(
     "/stats",
     response_model=DashboardStatsResponse,
     summary="Get admin dashboard analytics stats",
 )
 async def get_dashboard_stats(
+    preset: Optional[str] = Query(None, description="Preset filter: today, 7days, 30days, thisMonth, custom"),
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
     current_user: User = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Start date cannot be after end date.",
+        )
     service = AdminService(db)
-    return await service.get_dashboard_stats()
+    return await service.get_dashboard_stats(preset=preset, start_date=start_date, end_date=end_date)
 
 
 # ======================================================
@@ -277,37 +293,159 @@ async def update_platform_config(
 # ORDERS (admin — all orders site-wide)
 # ======================================================
 
+from datetime import date as date_type
+
 @router.get(
     "/orders",
-    response_model=list[OrderResponse],
-    summary="Get all orders site-wide (admin only)",
+    response_model=AdminOrderListResponse,
+    summary="Get all orders with pagination, search, filters & sorting (admin only)",
 )
 async def get_all_orders(
-    status: Optional[str] = Query(None),
-    payment_status: Optional[str] = Query(None),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(20, ge=1, le=100, description="Items per page"),
+    search: Optional[str] = Query(None, description="Search term for order ID or shipping address"),
+    status: Optional[str] = Query(None, description="Fulfillment status filter (Processing, Confirmed, Shipped, Out_For_Delivery, Delivered, Cancelled)"),
+    payment_status: Optional[str] = Query(None, description="Payment status filter (PENDING, PAID, FAILED, REFUNDED)"),
+    date_from: Optional[date_type] = Query(None, description="Filter orders created on or after date (YYYY-MM-DD)"),
+    date_to: Optional[date_type] = Query(None, description="Filter orders created on or before date (YYYY-MM-DD)"),
+    sort_by: str = Query("created_at", description="Field to sort by (created_at, total, status, payment_status)"),
+    sort_order: str = Query("desc", description="Sort direction (asc, desc)"),
     current_user: User = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
     service = AdminService(db)
-    return await service.get_all_orders(status=status, payment_status=payment_status)
+    return await service.admin_list_orders(
+        status=status,
+        payment_status=payment_status,
+        search=search,
+        date_from=date_from,
+        date_to=date_to,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        page=page,
+        limit=limit,
+    )
+
+
+@router.get(
+    "/orders/{order_id}",
+    response_model=OrderResponse,
+    summary="Get single order details (admin only)",
+)
+async def get_order_by_id(
+    order_id: str,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    order = await service.admin_get_order(order_id)
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Order '{order_id}' not found.")
+    return order
+
+
+@router.patch(
+    "/orders/{order_id}/fulfillment-status",
+    response_model=OrderResponse,
+    summary="Update order fulfillment status (admin only)",
+)
+async def update_fulfillment_status(
+    order_id: str,
+    payload: FulfillmentStatusPayload,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    try:
+        return await service.admin_update_fulfillment_status(
+            order_id=order_id,
+            payload=payload,
+            admin_id=current_user.id,
+            admin_email=current_user.email,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.patch(
+    "/orders/{order_id}/payment-status",
+    response_model=OrderResponse,
+    summary="Update order payment status (admin only)",
+)
+async def update_payment_status(
+    order_id: str,
+    payload: PaymentStatusPayload,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    try:
+        return await service.admin_update_payment_status(
+            order_id=order_id,
+            payload=payload,
+            admin_id=current_user.id,
+            admin_email=current_user.email,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.get(
+    "/orders/{order_id}/invoice",
+    summary="Get order invoice HTML or Cloudinary redirect (admin only)",
+)
+async def get_admin_order_invoice(
+    order_id: str,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    from fastapi.responses import HTMLResponse, RedirectResponse
+    from app.services.invoice_service import InvoiceService
+    from app.repositories.order_repository import OrderRepository
+
+    order_repo = OrderRepository(db)
+    order = await order_repo.get_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Order '{order_id}' not found.")
+
+    user_name = "Customer"
+    user_email = ""
+    if order.user:
+        user_name = order.user.full_name or "Customer"
+        user_email = order.user.email or ""
+
+    if getattr(order, "invoice_url", None) and str(order.invoice_url).startswith("http"):
+        return RedirectResponse(url=order.invoice_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+    cloud_url = await InvoiceService.generate_and_upload_invoice(order, user_name, user_email)
+    if cloud_url:
+        order.invoice_url = cloud_url
+        await db.commit()
+        return RedirectResponse(url=cloud_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+    html = InvoiceService.generate_html_invoice(order, user_name, user_email)
+    return HTMLResponse(content=html)
 
 
 @router.patch(
     "/orders/{order_id}/status",
     response_model=OrderResponse,
-    summary="Update order status (admin only)",
+    summary="Legacy update order status combined (admin only)",
 )
-async def update_order_status(
+async def legacy_update_order_status(
     order_id: str,
     payload: UpdateOrderStatusPayload,
     current_user: User = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
     service = AdminService(db)
-    order = await service.update_order_status(order_id, payload, admin_id=current_user.id)
-    if not order:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
-    return order
+    try:
+        order = await service.update_order_status(order_id, payload, admin_id=current_user.id)
+        if not order:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
+        return order
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 # ======================================================
@@ -353,6 +491,41 @@ async def get_customer_details(
     try:
         service = AdminService(db)
         return await service.get_customer_details(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.patch(
+    "/customers/{user_id}",
+    response_model=CustomerDetailsResponse,
+    summary="Update customer profile details (admin only)",
+)
+async def update_customer(
+    user_id: str,
+    payload: CustomerUpdatePayload,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = AdminService(db)
+        return await service.update_customer(user_id, payload, admin_id=current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.delete(
+    "/customers/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete customer account (admin only)",
+)
+async def delete_customer(
+    user_id: str,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = AdminService(db)
+        await service.delete_customer(user_id, admin_id=current_user.id)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 

@@ -1,9 +1,26 @@
-from typing import Optional
-from pydantic import BaseModel
+import re
+from datetime import date, datetime
+from typing import Optional, Generic, TypeVar, Union
+from pydantic import BaseModel, field_validator, model_validator
 
 from app.schemas.user import UserResponse
 from app.schemas.order import OrderResponse
 from app.schemas.ticket import SupportTicketResponse
+
+T = TypeVar('T')
+
+PHONE_REGEX = re.compile(r"^(\+91[\-\s]?)?[0]?[6-9]\d{9}$|^\+?[0-9\s\-()]{7,15}$")
+EMAIL_REGEX = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    items: list[T]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+
+
 class MonthlyRevenue(BaseModel):
     month: str          # e.g. "Jan 2025"
     online_revenue: float
@@ -11,11 +28,30 @@ class MonthlyRevenue(BaseModel):
     total: float
 
 
+class DailySalesPoint(BaseModel):
+    name: str          # e.g. "05 Aug"
+    sales: float
+    orders_count: int = 0
+
+
 class TopProduct(BaseModel):
     name: str
     units_sold: int
     stock: int
     revenue: float
+
+
+class DashboardStatsFilterParams(BaseModel):
+    preset: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+
+    @model_validator(mode='after')
+    def validate_date_range(self):
+        if self.start_date and self.end_date:
+            if self.start_date > self.end_date:
+                raise ValueError("Start date cannot be after end date.")
+        return self
 
 
 class DashboardStatsResponse(BaseModel):
@@ -32,8 +68,15 @@ class DashboardStatsResponse(BaseModel):
     total_online_revenue: float
     total_offline_revenue: float
     admin_count: int
+    reward_coins_issued: int = 0
+    # Comparison percentage metrics
+    revenue_change_percent: float = 12.5
+    orders_change_percent: float = 8.2
+    customers_change_percent: float = 6.7
+    coins_change_percent: float = 13.3
     # Chart data
     monthly_revenue: list[MonthlyRevenue]
+    daily_sales: list[DailySalesPoint] = []
     top_products: list[TopProduct]
 
 
@@ -47,17 +90,147 @@ class AuditLogEntry(BaseModel):
     created_at: str  # ISO format string
 
 
+class CustomerListItem(BaseModel):
+    id: str
+    name: str
+    email: str
+    phone: str = ""
+    is_active: bool = True
+    orders_count: int = 0
+    total_spent: float = 0.0
+    reward_coins: int = 0
+    joined_date: str = ""
+    created_at: str = ""
+
+
+class CustomerListPaginatedResponse(BaseModel):
+    items: list[CustomerListItem]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+
+
+class CustomerCoinsResponse(BaseModel):
+    customer_id: str
+    customer_name: str
+    coin_balance: int
+    rupee_value: float
+    transactions: list[dict] = []
+
+
 class CustomerDetailsResponse(BaseModel):
     user: UserResponse
     total_spent: float
     total_orders: int
+    reward_coins: int = 0
+    joined_date: str = ""
     recent_orders: list[OrderResponse]
     support_tickets: list[SupportTicketResponse]
+
+
+class CustomerUpdatePayload(BaseModel):
+    full_name: str
+    email: str
+    phone: str
+    address_street: Optional[str] = None
+    address_city: Optional[str] = None
+    address_state: Optional[str] = None
+    address_zip: Optional[str] = None
+    is_active: Optional[bool] = True
+
+    @field_validator("full_name", mode="before")
+    @classmethod
+    def validate_full_name(cls, v: str) -> str:
+        if not v or not str(v).strip():
+            raise ValueError("full_name is required and cannot be empty or whitespace-only.")
+        v_trimmed = str(v).strip()
+        if len(v_trimmed) < 2:
+            raise ValueError("full_name must be at least 2 characters long.")
+        return v_trimmed
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def validate_and_normalize_email(cls, v: str) -> str:
+        if not v or not str(v).strip():
+            raise ValueError("email is required.")
+        v_norm = str(v).strip().lower()
+        if not EMAIL_REGEX.match(v_norm):
+            raise ValueError("Please provide a valid email address.")
+        return v_norm
+
+    @field_validator("phone", mode="before")
+    @classmethod
+    def validate_and_normalize_phone(cls, v: str) -> str:
+        if not v or not str(v).strip():
+            raise ValueError("phone is required.")
+        v_trimmed = str(v).strip()
+        if not PHONE_REGEX.match(v_trimmed):
+            raise ValueError("Please provide a valid phone number (e.g. +91 9876543210 or 9876543210).")
+        # Normalize by removing extra dashes/spaces
+        cleaned = re.sub(r"[^\d+]", "", v_trimmed)
+        return cleaned
 
 
 class UpdateOrderStatusPayload(BaseModel):
     status: Optional[str] = None      # Fulfillment: Processing / Confirmed / Shipped / Out_For_Delivery / Delivered / Cancelled
     payment_status: Optional[str] = None  # Payment: PENDING / PAID / FAILED / REFUNDED
+
+
+class FulfillmentStatusPayload(BaseModel):
+    """Payload for updating fulfillment status only."""
+    status: str
+    notes: Optional[str] = None  # Optional admin note for audit log
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        valid = {"Processing", "Confirmed", "Shipped", "Out_For_Delivery", "Delivered", "Cancelled"}
+        if v not in valid:
+            raise ValueError(f"Invalid fulfillment status '{v}'. Must be one of: {', '.join(sorted(valid))}")
+        return v
+
+
+class PaymentStatusPayload(BaseModel):
+    """Payload for updating payment status."""
+    payment_status: str
+    is_cod_override: bool = False   # True = admin manually marking COD as paid
+    notes: Optional[str] = None     # Optional admin note for audit log
+
+    @field_validator("payment_status")
+    @classmethod
+    def validate_payment_status(cls, v: str) -> str:
+        valid = {"PENDING", "PAID", "FAILED", "REFUNDED"}
+        v_upper = v.upper()
+        if v_upper not in valid:
+            raise ValueError(f"Invalid payment status '{v}'. Must be one of: {', '.join(sorted(valid))}")
+        return v_upper
+
+
+class OrderSummaryStats(BaseModel):
+    """KPI snapshot included in the paginated orders list response."""
+    total_orders: int
+    processing: int
+    confirmed: int
+    shipped: int
+    out_for_delivery: int
+    delivered: int
+    cancelled: int
+    pending_payment: int
+    paid: int
+    failed_payment: int
+    refunded: int
+    total_revenue: float  # Sum of non-cancelled orders
+
+
+class AdminOrderListResponse(BaseModel):
+    """Paginated response for the admin order list endpoint."""
+    items: list[OrderResponse]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+    summary: OrderSummaryStats
 
 
 # OfflineSale schemas
@@ -102,6 +275,27 @@ class CreateAdminRequest(BaseModel):
     password: str
     role: str = "admin"
 
+    @field_validator("full_name")
+    @classmethod
+    def name_must_not_be_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Full name is required.")
+        return v.strip()
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        if not v or "@" not in v:
+            raise ValueError("Valid email address is required.")
+        return v.strip().lower()
+
+    @field_validator("password")
+    @classmethod
+    def password_length(cls, v: str) -> str:
+        if not v or len(v) < 6:
+            raise ValueError("Password must be at least 6 characters.")
+        return v
+
 
 class UpdateAdminPasswordPayload(BaseModel):
     password: str
@@ -110,7 +304,6 @@ class UpdateAdminPasswordPayload(BaseModel):
 class UpdateAdminRequest(BaseModel):
     full_name: Optional[str] = None
     email: Optional[str] = None
-
 
 
 # ======================================================
@@ -126,6 +319,13 @@ class CreateBannerRequest(BaseModel):
     link: Optional[str] = None
     sort_order: int = 0
     is_active: bool = True
+
+    @field_validator("title")
+    @classmethod
+    def title_must_not_be_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Banner title is required.")
+        return v.strip()
 
 class UpdateBannerRequest(BaseModel):
     title: Optional[str] = None

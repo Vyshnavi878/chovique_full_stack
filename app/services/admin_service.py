@@ -1,8 +1,10 @@
 import csv
 import io
 import logging
+import math
 import os
 import uuid
+from datetime import date, datetime
 from typing import Optional
 
 from fastapi import UploadFile
@@ -48,7 +50,15 @@ from app.schemas.admin import (
     UpdateAdminPasswordPayload,
     UpdateAdminRequest,
     UpdateOrderStatusPayload,
+    FulfillmentStatusPayload,
+    PaymentStatusPayload,
+    AdminOrderListResponse,
+    OrderSummaryStats,
     CustomerDetailsResponse,
+    CustomerUpdatePayload,
+    CustomerListItem,
+    CustomerListPaginatedResponse,
+    CustomerCoinsResponse,
 )
 from app.schemas.home import BannerResponse, ContactInfoResponse, StatsResponse, TestimonialResponse
 from app.schemas.order import OrderResponse
@@ -142,8 +152,13 @@ class AdminService:
     # Dashboard Stats
     # ==========================================================
 
-    async def get_dashboard_stats(self) -> DashboardStatsResponse:
-        from datetime import datetime, timezone, timedelta
+    async def get_dashboard_stats(
+        self,
+        preset: Optional[str] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> DashboardStatsResponse:
+        from datetime import datetime, timezone, timedelta, date as date_cls
         from calendar import month_abbr
         from sqlalchemy import extract, case
 
@@ -153,14 +168,27 @@ class AdminService:
         # --- Valid Paid/Completed Order Statuses ---
         valid_statuses = ["Paid", "Delivered", "Shipped", "Processing"]
 
+        # Date range boundaries
+        now = datetime.now(timezone.utc)
+        end_dt = datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc) if end_date else now
+        start_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc) if start_date else (now - timedelta(days=6))
+
         # --- Basic counts ---
         sales_result = await self.db.execute(
-            select(func.sum(Order.total)).where(Order.status.in_(valid_statuses))
+            select(func.sum(Order.total)).where(
+                Order.status.in_(valid_statuses),
+                Order.created_at >= start_dt,
+                Order.created_at <= end_dt,
+            )
         )
         total_sales = round(sales_result.scalar() or 0.0, 2)
 
         orders_result = await self.db.execute(
-            select(func.count()).select_from(Order).where(Order.status.in_(valid_statuses))
+            select(func.count()).select_from(Order).where(
+                Order.status.in_(valid_statuses),
+                Order.created_at >= start_dt,
+                Order.created_at <= end_dt,
+            )
         )
         total_orders = orders_result.scalar() or 0
 
@@ -188,7 +216,11 @@ class AdminService:
         units_sold_result = await self.db.execute(
             select(func.sum(OrderItem.quantity))
             .join(Order, OrderItem.order_id == Order.id)
-            .where(Order.status.in_(valid_statuses))
+            .where(
+                Order.status.in_(valid_statuses),
+                Order.created_at >= start_dt,
+                Order.created_at <= end_dt,
+            )
         )
         total_units_sold = int(units_sold_result.scalar() or 0)
 
@@ -198,12 +230,21 @@ class AdminService:
 
         # Online revenue (valid paid/completed orders)
         online_rev_result = await self.db.execute(
-            select(func.sum(Order.total)).where(Order.status.in_(valid_statuses))
+            select(func.sum(Order.total)).where(
+                Order.status.in_(valid_statuses),
+                Order.created_at >= start_dt,
+                Order.created_at <= end_dt,
+            )
         )
         total_online_revenue = round(online_rev_result.scalar() or 0.0, 2)
 
         # Offline revenue
-        offline_rev_result = await self.db.execute(select(func.sum(OfflineSale.total_price)))
+        offline_rev_result = await self.db.execute(
+            select(func.sum(OfflineSale.total_price)).where(
+                OfflineSale.created_at >= start_dt,
+                OfflineSale.created_at <= end_dt,
+            )
+        )
         total_offline_revenue = round(offline_rev_result.scalar() or 0.0, 2)
 
         # Admin count (admin + superadmin)
@@ -212,8 +253,33 @@ class AdminService:
         )
         admin_count = int(admin_count_result.scalar() or 0)
 
+        # Reward coins issued
+        from app.models.wallet import CoinTransaction
+        coins_result = await self.db.execute(
+            select(func.sum(CoinTransaction.coins)).where(CoinTransaction.type.in_(["EARN", "ADJUSTMENT"]))
+        )
+        reward_coins_issued = int(coins_result.scalar() or 0)
+
+        # --- Daily Sales trend for chart ---
+        from app.schemas.admin import DailySalesPoint, TopProduct, MonthlyRevenue
+        daily_sales = []
+        curr_day = start_dt
+        while curr_day.date() <= end_dt.date():
+            nxt_day = curr_day + timedelta(days=1)
+            day_res = await self.db.execute(
+                select(func.coalesce(func.sum(Order.total), 0.0), func.count(Order.id))
+                .where(
+                    Order.status.in_(valid_statuses),
+                    Order.created_at >= curr_day,
+                    Order.created_at < nxt_day,
+                )
+            )
+            s_val, c_val = day_res.one()
+            day_label = curr_day.strftime("%d %b")
+            daily_sales.append(DailySalesPoint(name=day_label, sales=round(float(s_val or 0.0), 2), orders_count=int(c_val or 0)))
+            curr_day = nxt_day
+
         # --- Monthly revenue — last 6 months ---
-        now = datetime.now(timezone.utc)
         monthly_revenue = []
         for i in range(5, -1, -1):  # 5 months ago → this month
             target = now - timedelta(days=i * 30)
@@ -245,7 +311,6 @@ class AdminService:
             ))
 
         # --- Top 5 products by units sold ---
-        from app.schemas.admin import TopProduct
         top_prod_result = await self.db.execute(
             select(
                 Product.name,
@@ -282,7 +347,9 @@ class AdminService:
             total_online_revenue=total_online_revenue,
             total_offline_revenue=total_offline_revenue,
             admin_count=admin_count,
+            reward_coins_issued=reward_coins_issued,
             monthly_revenue=monthly_revenue,
+            daily_sales=daily_sales,
             top_products=top_products,
         )
 
@@ -412,7 +479,272 @@ class AdminService:
 
 
     # ==========================================================
-    # Orders
+    # Orders — constants
+    # ==========================================================
+
+    _FULFILLMENT_TRANSITIONS: dict[str, set[str]] = {
+        "Processing":       {"Confirmed", "Cancelled"},
+        "Confirmed":        {"Shipped", "Cancelled"},
+        "Shipped":          {"Out_For_Delivery", "Cancelled"},
+        "Out_For_Delivery": {"Delivered"},
+        "Delivered":        set(),   # terminal
+        "Cancelled":        set(),   # terminal
+    }
+
+    _PAYMENT_TRANSITIONS: dict[str, set[str]] = {
+        "PENDING":  {"PAID", "FAILED"},
+        "PAID":     {"REFUNDED"},
+        "FAILED":   {"PENDING"},    # allow retry
+        "REFUNDED": set(),          # terminal
+    }
+
+    # ==========================================================
+    # Orders — helpers
+    # ==========================================================
+
+    def _validate_fulfillment_transition(self, current: str, new_status: str) -> None:
+        """Raise ValueError if the transition is not allowed."""
+        allowed = self._FULFILLMENT_TRANSITIONS.get(current, set())
+        if new_status != current and new_status not in allowed:
+            raise ValueError(
+                f"Cannot transition fulfillment from '{current}' to '{new_status}'. "
+                f"Allowed next states: {sorted(allowed) or 'none (terminal state)'}."
+            )
+
+    def _validate_payment_transition(self, current: str, new_status: str) -> None:
+        """Raise ValueError if the payment transition is not allowed."""
+        allowed = self._PAYMENT_TRANSITIONS.get(current, set())
+        if new_status != current and new_status not in allowed:
+            raise ValueError(
+                f"Cannot transition payment from '{current}' to '{new_status}'. "
+                f"Allowed next states: {sorted(allowed) or 'none (terminal state)'}."
+            )
+
+    async def _restore_stock_on_cancel(self, order) -> None:
+        """Restore product stock for each item when an order is cancelled."""
+        try:
+            for item in order.items:
+                product = await self.product_repo.get_by_id(item.product_id)
+                if product is not None:
+                    new_stock = (product.stock or 0) + item.quantity
+                    await self.product_repo.update(item.product_id, stock=new_stock)
+                    logger.info(
+                        "Stock restored: product=%s +%d (order_cancel=%s)",
+                        item.product_id, item.quantity, order.id,
+                    )
+        except Exception as exc:
+            logger.error("Failed to restore stock on cancel for order %s: %s", order.id, exc)
+
+    def _fmt_order(self, order) -> OrderResponse:
+        from app.services.customer_service import CustomerService
+        cs = CustomerService(self.db)
+        return cs._format_order_response(order)
+
+    # ==========================================================
+    # Orders — LIST (paginated, filtered, searched, sorted)
+    # ==========================================================
+
+    async def admin_list_orders(
+        self,
+        *,
+        status: Optional[str] = None,
+        payment_status: Optional[str] = None,
+        search: Optional[str] = None,
+        date_from=None,
+        date_to=None,
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
+        page: int = 1,
+        limit: int = 20,
+    ) -> AdminOrderListResponse:
+        """Paginated, filtered, sorted admin order list with KPI summary."""
+        orders, total = await self.order_repo.admin_list_orders(
+            status=status,
+            payment_status=payment_status,
+            search=search,
+            date_from=date_from,
+            date_to=date_to,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            page=page,
+            limit=limit,
+        )
+        summary_data = await self.order_repo.admin_count_summary()
+        total_pages = max(1, math.ceil(total / limit))
+
+        return AdminOrderListResponse(
+            items=[self._fmt_order(o) for o in orders],
+            total=total,
+            page=page,
+            limit=limit,
+            total_pages=total_pages,
+            summary=OrderSummaryStats(**summary_data),
+        )
+
+    # ==========================================================
+    # Orders — GET SINGLE
+    # ==========================================================
+
+    async def admin_get_order(self, order_id: str) -> OrderResponse | None:
+        """Fetch a single order by ID for admin view."""
+        order = await self.order_repo.get_by_id(order_id)
+        if order is None:
+            return None
+        return self._fmt_order(order)
+
+    # ==========================================================
+    # Orders — UPDATE FULFILLMENT STATUS
+    # ==========================================================
+
+    async def admin_update_fulfillment_status(
+        self,
+        order_id: str,
+        payload: FulfillmentStatusPayload,
+        admin_id: str,
+        admin_email: str = "",
+    ) -> OrderResponse:
+        """
+        Update an order's fulfillment status with:
+        - Forward-only transition enforcement
+        - Stock restoration on Cancelled
+        - Email notifications for Shipped / Cancelled
+        - Detailed audit logging
+        - DB transaction wrapping all writes
+        """
+        order = await self.order_repo.get_by_id(order_id)
+        if not order:
+            raise ValueError(f"Order '{order_id}' not found.")
+
+        current_status = order.status or "Processing"
+        new_status = payload.status
+        self._validate_fulfillment_transition(current_status, new_status)
+
+        try:
+            # -- Apply status change --
+            order.status = new_status
+            await self.db.flush()
+
+            # -- Restore stock if cancelled --
+            if new_status == "Cancelled":
+                await self._restore_stock_on_cancel(order)
+
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            raise
+
+        # -- Determine audit action --
+        if new_status == "Cancelled":
+            action = "order.cancelled"
+        elif new_status == "Delivered":
+            action = "order.delivered"
+        else:
+            action = "order.fulfillment_status_changed"
+
+        note_str = f" | Note: {payload.notes}" if payload.notes else ""
+        await self.audit_repo.log(
+            action=action,
+            user_id=admin_id,
+            resource=f"order:{order_id}",
+            details=(
+                f"Fulfillment: '{current_status}' → '{new_status}'"
+                f" | admin: {admin_email}{note_str}"
+            ),
+        )
+
+        # -- Email notifications (best-effort, never block the response) --
+        try:
+            user = await self.user_repo.get_by_id(order.user_id)
+            if user:
+                if new_status == "Shipped":
+                    await resend_email.send_shipping_update(
+                        email=user.email,
+                        name=user.full_name,
+                        order_id=order.id,
+                        tracking_number="TRACK-" + order.id[-6:],
+                    )
+                elif new_status == "Cancelled":
+                    await resend_email.send_cancellation(
+                        email=user.email,
+                        name=user.full_name,
+                        order_id=order.id,
+                    )
+        except Exception as email_err:
+            logger.warning("Order notification email failed for %s: %s", order_id, email_err)
+
+        # Re-fetch to get fresh relationships
+        refreshed = await self.order_repo.get_by_id(order_id)
+        return self._fmt_order(refreshed)
+
+    # ==========================================================
+    # Orders — UPDATE PAYMENT STATUS
+    # ==========================================================
+
+    async def admin_update_payment_status(
+        self,
+        order_id: str,
+        payload: PaymentStatusPayload,
+        admin_id: str,
+        admin_email: str = "",
+    ) -> OrderResponse:
+        """
+        Update an order's payment status with:
+        - Forward-only transition enforcement
+        - COD mark-as-paid guard (only when is_cod_override=True AND method is COD)
+        - Refund auditing
+        - DB transaction wrapping
+        """
+        order = await self.order_repo.get_by_id(order_id)
+        if not order:
+            raise ValueError(f"Order '{order_id}' not found.")
+
+        current_ps = (order.payment_status or "PENDING").upper()
+        new_ps = payload.payment_status  # already uppercased by validator
+
+        self._validate_payment_transition(current_ps, new_ps)
+
+        # COD guard: marking PENDING → PAID on a COD order requires explicit override flag
+        is_cod = (order.payment_method or "").upper() in ("COD", "CASH ON DELIVERY")
+        if is_cod and new_ps == "PAID" and current_ps == "PENDING":
+            if not payload.is_cod_override:
+                raise ValueError(
+                    "COD orders can only be marked as PAID using the explicit "
+                    "is_cod_override=true flag. This prevents accidental payment marking."
+                )
+
+        try:
+            order.payment_status = new_ps
+            await self.db.flush()
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            raise
+
+        # -- Audit --
+        if new_ps == "REFUNDED":
+            action = "order.refunded"
+        elif is_cod and new_ps == "PAID":
+            action = "order.cod_marked_paid"
+        else:
+            action = "order.payment_status_changed"
+
+        note_str = f" | Note: {payload.notes}" if payload.notes else ""
+        await self.audit_repo.log(
+            action=action,
+            user_id=admin_id,
+            resource=f"order:{order_id}",
+            details=(
+                f"Payment: '{current_ps}' → '{new_ps}'"
+                f" | admin: {admin_email}"
+                f"{' | COD override' if payload.is_cod_override else ''}{note_str}"
+            ),
+        )
+
+        refreshed = await self.order_repo.get_by_id(order_id)
+        return self._fmt_order(refreshed)
+
+    # ==========================================================
+    # Orders — BACKWARD-COMPAT (old combined endpoint)
     # ==========================================================
 
     async def update_order_status(
@@ -421,122 +753,59 @@ class AdminService:
         payload: UpdateOrderStatusPayload,
         admin_id: str,
     ) -> OrderResponse | None:
+        """
+        Legacy combined update endpoint preserved for backward compatibility.
+        Delegates to the new separate methods.
+        """
         order = await self.order_repo.get_by_id(order_id)
         if not order:
             return None
 
-        # --- Fulfillment status transition validation ---
-        VALID_ORDER_STATUSES = {
-            "Processing", "Confirmed", "Shipped", "Out_For_Delivery", "Delivered", "Cancelled"
-        }
-        ALLOWED_TRANSITIONS = {
-            "Processing":       {"Confirmed", "Shipped", "Cancelled"},
-            "Confirmed":        {"Shipped", "Cancelled"},
-            "Shipped":          {"Out_For_Delivery", "Delivered"},
-            "Out_For_Delivery": {"Delivered"},
-            "Delivered":        set(),       # Terminal — no further changes
-            "Cancelled":        set(),       # Terminal
-        }
+        result = None
 
         if payload.status is not None:
-            new_status = payload.status
-            if new_status not in VALID_ORDER_STATUSES:
-                raise ValueError(f"Invalid order status: {new_status}")
-            current = order.status
-            allowed = ALLOWED_TRANSITIONS.get(current, set())
-            if new_status != current and new_status not in allowed:
-                raise ValueError(
-                    f"Cannot transition order from '{current}' to '{new_status}'."
-                )
-            order.status = new_status
-
-        # --- Payment status transition validation ---
-        VALID_PAYMENT_STATUSES = {"PENDING", "PAID", "FAILED", "REFUNDED"}
-        ALLOWED_PAYMENT_TRANSITIONS = {
-            "PENDING":  {"PAID", "FAILED"},
-            "PAID":     {"REFUNDED"},
-            "FAILED":   {"PENDING"},   # Allow retry
-            "REFUNDED": set(),         # Terminal
-        }
+            from app.schemas.admin import FulfillmentStatusPayload as FSP
+            result = await self.admin_update_fulfillment_status(
+                order_id,
+                FSP(status=payload.status),
+                admin_id=admin_id,
+            )
 
         if payload.payment_status is not None:
-            new_ps = payload.payment_status.upper()
-            if new_ps not in VALID_PAYMENT_STATUSES:
-                raise ValueError(f"Invalid payment status: {new_ps}")
-            current_ps = getattr(order, "payment_status", "PENDING") or "PENDING"
-            allowed_ps = ALLOWED_PAYMENT_TRANSITIONS.get(current_ps.upper(), set())
-            if new_ps != current_ps.upper() and new_ps not in allowed_ps:
-                raise ValueError(
-                    f"Cannot transition payment from '{current_ps}' to '{new_ps}'."
-                )
-            order.payment_status = new_ps
+            from app.schemas.admin import PaymentStatusPayload as PSP
+            result = await self.admin_update_payment_status(
+                order_id,
+                PSP(payment_status=payload.payment_status, is_cod_override=True),
+                admin_id=admin_id,
+            )
 
-        await self.db.commit()
+        if result is None:
+            # Nothing changed — return current state
+            result = self._fmt_order(order)
 
-        changes = []
-        if payload.status:
-            changes.append(f"order status → {payload.status}")
-        if payload.payment_status:
-            changes.append(f"payment status → {payload.payment_status}")
-
-        await self.audit_repo.log(
-            action="update_order_status",
-            user_id=admin_id,
-            resource=f"order:{order_id}",
-            details=f"Order updated: {', '.join(changes)}",
-        )
-
-        user = await self.user_repo.get_by_id(order.user_id)
-        if user:
-            if payload.status == "Shipped":
-                await resend_email.send_shipping_update(
-                    email=user.email,
-                    name=user.full_name,
-                    order_id=order.id,
-                    tracking_number="TRACK-" + order.id[-6:],
-                )
-            elif payload.status == "Cancelled":
-                await resend_email.send_cancellation(
-                    email=user.email,
-                    name=user.full_name,
-                    order_id=order.id,
-                )
-
-        from app.services.customer_service import CustomerService
-        cs = CustomerService(self.db)
-        return cs._format_order_response(order)
+        return result
 
     async def get_all_orders(
         self,
         status: Optional[str] = None,
         payment_status: Optional[str] = None,
     ) -> list[OrderResponse]:
-        """Get all orders site-wide (admin view), with optional status filters."""
-        from sqlalchemy.orm import selectinload
-        from sqlalchemy import func
-        from app.models.order import OrderItem
-
-        query = (
-            select(Order)
-            .options(
-                selectinload(Order.items).selectinload(OrderItem.product)
-            )
+        """
+        Legacy list endpoint (no pagination) kept for backward compatibility.
+        New code should use admin_list_orders() instead.
+        """
+        resp = await self.admin_list_orders(
+            status=status,
+            payment_status=payment_status,
+            limit=500,   # practical cap
+            page=1,
         )
-        if status and status.upper() != "ALL":
-            query = query.where(func.lower(Order.status) == status.lower())
-        if payment_status and payment_status.upper() != "ALL":
-            query = query.where(func.lower(Order.payment_status) == payment_status.lower())
-        
-        query = query.order_by(Order.created_at.desc())
-        result = await self.db.execute(query)
-        orders = result.scalars().all()
-        from app.services.customer_service import CustomerService
-        cs = CustomerService(self.db)
-        return [cs._format_order_response(o) for o in orders]
+        return resp.items
 
     # ==========================================================
     # Users
     # ==========================================================
+
 
     async def get_all_users(self) -> list[SystemUserResponse]:
         result = await self.db.execute(select(User).order_by(User.created_at.desc()))
@@ -548,9 +817,126 @@ class AdminService:
         users = result.scalars().all()
         return [SystemUserResponse.from_orm_user(u) for u in users]
 
+    async def get_customers_paginated(
+        self,
+        search: Optional[str] = None,
+        page: int = 1,
+        limit: int = 20,
+    ) -> CustomerListPaginatedResponse:
+        from app.repositories.wallet_repository import WalletRepository
+        wallet_repo = WalletRepository(self.db)
+
+        users, total = await self.user_repo.list_customers_paginated(
+            search=search, page=page, limit=limit
+        )
+
+        items = []
+        for u in users:
+            wallet = await wallet_repo.get_or_create_wallet(u.id)
+            orders = await self.order_repo.get_user_orders(u.id)
+            non_cancelled = [o for o in orders if getattr(o, 'status', '') != 'Cancelled']
+            spent = sum(o.total for o in non_cancelled)
+
+            items.append(
+                CustomerListItem(
+                    id=u.id,
+                    name=u.full_name,
+                    email=u.email,
+                    phone=u.phone or "",
+                    is_active=u.is_active,
+                    orders_count=len(orders),
+                    total_spent=spent,
+                    reward_coins=wallet.coin_balance if wallet else 0,
+                    joined_date=u.created_at.strftime("%b %Y") if u.created_at else "",
+                    created_at=u.created_at.strftime("%Y-%m-%d") if u.created_at else "",
+                )
+            )
+
+        total_pages = max(1, math.ceil(total / limit))
+        return CustomerListPaginatedResponse(
+            items=items,
+            total=total,
+            page=page,
+            limit=limit,
+            total_pages=total_pages,
+        )
+
+    async def get_customer_orders(self, customer_id: str, page: int = 1, limit: int = 20):
+        user = await self.user_repo.get_by_id(customer_id)
+        if not user or user.role != "customer":
+            raise ValueError("Customer not found.")
+
+        orders = await self.order_repo.get_user_orders(customer_id)
+        from app.services.customer_service import CustomerService
+        cs = CustomerService(self.db)
+        formatted = [cs._format_order_response(o) for o in orders]
+
+        offset = (page - 1) * limit
+        paginated_items = formatted[offset:offset+limit]
+        total = len(formatted)
+        total_pages = max(1, math.ceil(total / limit))
+
+        return {
+            "items": paginated_items,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": total_pages,
+        }
+
+    async def get_customer_support(self, customer_id: str):
+        user = await self.user_repo.get_by_id(customer_id)
+        if not user or user.role != "customer":
+            raise ValueError("Customer not found.")
+
+        result_tickets = await self.db.execute(
+            select(SupportTicket)
+            .where(SupportTicket.customer_id == customer_id)
+            .order_by(SupportTicket.created_at.desc())
+        )
+        tickets = result_tickets.scalars().all()
+        from app.services.customer_service import CustomerService
+        cs = CustomerService(self.db)
+        return [cs._format_ticket_response(t) for t in tickets]
+
+    async def get_customer_coins(self, customer_id: str) -> CustomerCoinsResponse:
+        user = await self.user_repo.get_by_id(customer_id)
+        if not user or user.role != "customer":
+            raise ValueError("Customer not found.")
+
+        from app.repositories.wallet_repository import WalletRepository
+        from app.services.wallet_service import WalletService
+
+        wallet_repo = WalletRepository(self.db)
+        wallet_svc = WalletService(self.db)
+
+        wallet = await wallet_repo.get_or_create_wallet(customer_id)
+        settings = await wallet_svc.get_reward_settings()
+        txs = await wallet_repo.get_transactions(customer_id, limit=50)
+
+        rupee_val = round(wallet.coin_balance / settings.coins_per_rupee, 2) if settings.coins_per_rupee > 0 else 0.0
+
+        return CustomerCoinsResponse(
+            customer_id=customer_id,
+            customer_name=user.full_name,
+            coin_balance=wallet.coin_balance,
+            rupee_value=rupee_val,
+            transactions=[
+                {
+                    "id": t.id,
+                    "type": t.transaction_type,
+                    "coins": t.coins,
+                    "description": t.description,
+                    "created_at": t.created_at.strftime("%Y-%m-%d %H:%M") if t.created_at else "",
+                }
+                for t in txs
+            ],
+        )
+
     async def get_customer_details(self, user_id: str) -> CustomerDetailsResponse:
         from sqlalchemy.orm import selectinload
         from app.models.order import OrderItem
+        from app.repositories.wallet_repository import WalletRepository
 
         user = await self.user_repo.get_by_id(user_id)
         if not user or user.role != "customer":
@@ -565,21 +951,73 @@ class AdminService:
             .order_by(Order.created_at.desc())
         )
         orders = result_orders.scalars().all()
-        
-        result_tickets = await self.db.execute(select(SupportTicket).where(SupportTicket.user_id == user_id).order_by(SupportTicket.created_at.desc()))
+
+        result_tickets = await self.db.execute(select(SupportTicket).where(SupportTicket.customer_id == user_id).order_by(SupportTicket.created_at.desc()))
         tickets = result_tickets.scalars().all()
+
+        wallet_repo = WalletRepository(self.db)
+        wallet = await wallet_repo.get_or_create_wallet(user_id)
 
         from app.schemas.user import UserResponse
         from app.services.customer_service import CustomerService
-        
+
         cs = CustomerService(self.db)
-        
+
         return CustomerDetailsResponse(
             user=UserResponse.from_orm_user(user),
-            total_spent=sum(o.total for o in orders),
+            total_spent=sum(o.total for o in orders if getattr(o, 'status', '') != 'Cancelled'),
             total_orders=len(orders),
-            recent_orders=[cs._format_order_response(o) for o in orders[:5]],
+            reward_coins=wallet.coin_balance if wallet else 0,
+            joined_date=user.created_at.strftime("%b %Y") if user.created_at else "",
+            recent_orders=[cs._format_order_response(o) for o in orders],
             support_tickets=[cs._format_ticket_response(t) for t in tickets],
+        )
+
+    async def update_customer(self, user_id: str, payload: CustomerUpdatePayload, admin_id: str):
+        user = await self.user_repo.get_by_id(user_id)
+        if not user or user.role != "customer":
+            raise ValueError("Customer account not found.")
+
+        changes = []
+        if payload.full_name is not None and payload.full_name.strip():
+            user.full_name = payload.full_name.strip()
+            changes.append("full_name")
+        if payload.email is not None and payload.email.strip() != user.email:
+            existing = await self.user_repo.get_by_email(payload.email.strip())
+            if existing and existing.id != user_id:
+                raise ValueError("A user with this email address already exists.")
+            user.email = payload.email.strip()
+            changes.append("email")
+        if payload.phone is not None:
+            user.phone = payload.phone.strip()
+            changes.append("phone")
+        if payload.is_active is not None:
+            user.is_active = payload.is_active
+            changes.append(f"is_active: {payload.is_active}")
+
+        await self.db.commit()
+        await self.db.refresh(user)
+
+        await self.audit_repo.log(
+            action="update_customer_profile",
+            user_id=admin_id,
+            resource=f"user:{user_id}",
+            details=f"Updated customer profile fields: {', '.join(changes) if changes else 'none'}",
+        )
+        return await self.get_customer_details(user_id)
+
+    async def delete_customer(self, user_id: str, admin_id: str):
+        user = await self.user_repo.get_by_id(user_id)
+        if not user or user.role != "customer":
+            raise ValueError("Customer account not found.")
+
+        email = user.email
+        await self.user_repo.delete(user_id)
+        await self.audit_repo.log(
+            action="delete_customer",
+            user_id=admin_id,
+            resource=f"user:{user_id}",
+            details=f"Permanently deleted customer account: {email}",
         )
 
     async def create_admin(self, payload: CreateAdminRequest, superadmin_id: str) -> SystemUserResponse:

@@ -102,8 +102,14 @@ class ProductService:
         if data.nutrition:
             nutrition_dict = data.nutrition.model_dump()
 
+        sku = data.sku
+        if not sku:
+            count = await self.product_repo.count()
+            sku = f"CHO{count + 1:03d}"
+
         product = await self.product_repo.create(
             name=data.name,
+            sku=sku,
             slug=slug,
             category=data.category,
             price=data.price,

@@ -44,7 +44,8 @@ class Product(Base):
     price = Column(Float, nullable=False)
     original_price = Column(Float, nullable=True)
     weight = Column(String(50), nullable=True)
-    stock = Column(Integer, default=100, nullable=False)
+    stock = Column(Integer, default=100, nullable=False, index=True)
+    sku = Column(String(50), nullable=True, index=True)
 
     # ==========================
     # Details

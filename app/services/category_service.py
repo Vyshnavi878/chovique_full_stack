@@ -25,8 +25,22 @@ class CategoryService:
         self.product_repo = ProductRepository(db)
 
     async def get_categories(self) -> list[CategoryResponse]:
+        from sqlalchemy import select, func
+        from app.models.product import Product
+
         categories = await self.category_repo.get_all()
-        return [CategoryResponse.model_validate(c) for c in categories]
+        res = []
+        for c in categories:
+            count_res = await self.db.execute(
+                select(func.count(Product.id)).where(
+                    Product.category.ilike(f"%{c.slug}%") | Product.category.ilike(f"%{c.name.split()[0]}%")
+                )
+            )
+            p_count = int(count_res.scalar() or 0)
+            data = CategoryResponse.model_validate(c)
+            data.product_count = p_count
+            res.append(data)
+        return res
 
     async def get_category(self, category_id: str) -> CategoryResponse | None:
         category = await self.category_repo.get_by_id(category_id)

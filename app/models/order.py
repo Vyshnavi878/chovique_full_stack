@@ -27,14 +27,14 @@ class Order(Base):
     coins_earned = Column(Integer, default=0, nullable=False)
     shipping = Column(Float, default=0.0, nullable=False)
     tax = Column(Float, default=0.0, nullable=False)
-    status = Column(String(50), default="Processing", nullable=False)
-    payment_status = Column(String(50), default="PENDING", nullable=False)
+    status = Column(String(50), default="Processing", nullable=False, index=True)
+    payment_status = Column(String(50), default="PENDING", nullable=False, index=True)
     shipping_address = Column(JSON, nullable=False)
     delivery_option = Column(String(100), default="Standard Delivery", nullable=False)
     payment_method = Column(String(100), default="UPI", nullable=False)
     invoice_url = Column(String(500), nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
     user = relationship("User", lazy="selectin")
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan", lazy="selectin")

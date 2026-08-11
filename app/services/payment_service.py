@@ -5,7 +5,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.integrations.razorpay import razorpay_client
 from app.integrations.resend import resend_email
 from app.repositories.cart_repository import CartRepository
-from app.repositories.inventory_repository import InventoryRepository
 from app.repositories.order_repository import OrderRepository
 from app.repositories.payment_repository import PaymentRepository
 from app.repositories.product_repository import ProductRepository
@@ -23,7 +22,6 @@ class PaymentService:
         self.order_repo = OrderRepository(db)
         self.product_repo = ProductRepository(db)
         self.cart_repo = CartRepository(db)
-        self.inventory_repo = InventoryRepository(db)
         self.user_repo = UserRepository(db)
 
     async def verify_payment(
@@ -92,13 +90,6 @@ class PaymentService:
                 if product:
                     new_stock = max(0, product.stock - item.quantity)
                     await self.product_repo.update(product.id, stock=new_stock)
-                    await self.inventory_repo.log_change(
-                        product_id=product.id,
-                        change_quantity=-item.quantity,
-                        reason="sale",
-                        notes=f"Order #{order.id} payment confirmed.",
-                        performed_by=user_id,
-                    )
 
             # Step 4: Clear user's shopping cart
             cart = await self.cart_repo.get_or_create_user_cart(user_id)

@@ -199,4 +199,33 @@ class UserRepository:
         result = await self.db.execute(
             select(func.count(User.id)).where(User.role == "customer")
         )
-        return result.scalar_one_or_none() or 0
+        return result.scalar_one_or_none() or 0
+
+    async def list_customers_paginated(
+        self,
+        search: str | None = None,
+        page: int = 1,
+        limit: int = 20,
+    ) -> tuple[list[User], int]:
+        from sqlalchemy import select, func, or_
+        query = select(User).where(User.role == "customer")
+        if search and search.strip():
+            like = f"%{search.strip().lower()}%"
+            query = query.where(
+                or_(
+                    func.lower(User.full_name).like(like),
+                    func.lower(User.email).like(like),
+                    func.lower(User.phone).like(like),
+                )
+            )
+
+        count_query = select(func.count()).select_from(query.subquery())
+        count_res = await self.db.execute(count_query)
+        total = count_res.scalar_one_or_none() or 0
+
+        offset = (page - 1) * limit
+        data_query = query.order_by(User.created_at.desc()).offset(offset).limit(limit)
+        data_res = await self.db.execute(data_query)
+        users = list(data_res.scalars().all())
+
+        return users, total

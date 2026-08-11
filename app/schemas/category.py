@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CategoryBase(BaseModel):
@@ -10,6 +10,13 @@ class CategoryBase(BaseModel):
     image_url: Optional[str] = None
     parent_id: Optional[str] = None
     sort_order: int = 0
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Category name is required and cannot be empty.")
+        return v.strip()
 
 
 class CategoryCreate(CategoryBase):
@@ -30,6 +37,7 @@ class CategoryResponse(CategoryBase):
     id: str
     slug: str
     is_active: bool
+    product_count: int = 0
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -39,6 +47,7 @@ class AdminCategoryResponse(CategoryBase):
     id: str
     slug: str
     is_active: bool
+    product_count: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

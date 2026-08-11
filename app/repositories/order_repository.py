@@ -1,5 +1,8 @@
 import re
-from sqlalchemy import select
+from datetime import date, datetime
+from typing import Optional, Literal
+
+from sqlalchemy import select, func, or_, and_, cast, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.models.order import Order, OrderItem, OrderSequence
@@ -128,3 +131,144 @@ class OrderRepository:
             .where(Order.id == order_id)
         )
         return result.scalar_one_or_none()
+
+    # ──────────────────────────────────────────────────────────────
+    # Admin list / search / pagination
+    # ──────────────────────────────────────────────────────────────
+
+    def _build_admin_filter(
+        self,
+        query,
+        *,
+        status: Optional[str] = None,
+        payment_status: Optional[str] = None,
+        search: Optional[str] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+    ):
+        """Attach WHERE clauses to the base query (reused by list and count)."""
+        if status and status.upper() != "ALL":
+            query = query.where(Order.status == status)
+        if payment_status and payment_status.upper() != "ALL":
+            query = query.where(Order.payment_status == payment_status.upper())
+
+        if search and search.strip():
+            like = f"%{search.strip().lower()}%"
+            query = query.where(
+                or_(
+                    func.lower(Order.id).like(like),
+                    # Search inside the JSON shipping_address field
+                    func.lower(cast(Order.shipping_address, type_=__import__('sqlalchemy').Text)).like(like),
+                )
+            )
+
+        if date_from:
+            query = query.where(cast(Order.created_at, Date) >= date_from)
+        if date_to:
+            query = query.where(cast(Order.created_at, Date) <= date_to)
+
+        return query
+
+    async def admin_list_orders(
+        self,
+        *,
+        status: Optional[str] = None,
+        payment_status: Optional[str] = None,
+        search: Optional[str] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
+        page: int = 1,
+        limit: int = 20,
+    ) -> tuple[list[Order], int]:
+        """
+        Return (orders_list, total_count) for the admin order management page.
+        Supports filtering, full-text search on order ID and shipping address,
+        date range, field sorting, and offset pagination.
+        """
+        # Allowed sort columns (whitelist to prevent SQL injection)
+        SORTABLE = {
+            "created_at": Order.created_at,
+            "total": Order.total,
+            "status": Order.status,
+            "payment_status": Order.payment_status,
+        }
+        sort_col = SORTABLE.get(sort_by, Order.created_at)
+        sort_expr = sort_col.asc() if sort_order.lower() == "asc" else sort_col.desc()
+
+        # Count query (no eager loading needed)
+        count_q = self._build_admin_filter(
+            select(func.count()).select_from(Order),
+            status=status,
+            payment_status=payment_status,
+            search=search,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        count_result = await self.db.execute(count_q)
+        total = count_result.scalar_one()
+
+        # Data query with eager-loaded items+products
+        data_q = self._build_admin_filter(
+            select(Order).options(
+                selectinload(Order.items).selectinload(OrderItem.product)
+            ),
+            status=status,
+            payment_status=payment_status,
+            search=search,
+            date_from=date_from,
+            date_to=date_to,
+        ).order_by(sort_expr)
+
+        offset = (page - 1) * limit
+        data_q = data_q.offset(offset).limit(limit)
+
+        data_result = await self.db.execute(data_q)
+        orders = list(data_result.scalars().all())
+
+        return orders, total
+
+    async def admin_count_summary(self) -> dict:
+        """
+        Return KPI counts for all fulfillment/payment statuses and total revenue.
+        Used to populate the summary block in AdminOrderListResponse.
+        """
+        # Fulfillment status counts
+        fulfillment_q = await self.db.execute(
+            select(Order.status, func.count().label("cnt"))
+            .group_by(Order.status)
+        )
+        fulfillment_counts = {row.status: row.cnt for row in fulfillment_q}
+
+        # Payment status counts
+        payment_q = await self.db.execute(
+            select(Order.payment_status, func.count().label("cnt"))
+            .group_by(Order.payment_status)
+        )
+        payment_counts = {row.payment_status: row.cnt for row in payment_q}
+
+        # Revenue from non-cancelled orders
+        revenue_q = await self.db.execute(
+            select(func.coalesce(func.sum(Order.total), 0.0))
+            .where(Order.status != "Cancelled")
+        )
+        total_revenue = float(revenue_q.scalar_one())
+
+        total_orders_q = await self.db.execute(select(func.count()).select_from(Order))
+        total_orders = total_orders_q.scalar_one()
+
+        return {
+            "total_orders": total_orders,
+            "processing": fulfillment_counts.get("Processing", 0),
+            "confirmed": fulfillment_counts.get("Confirmed", 0),
+            "shipped": fulfillment_counts.get("Shipped", 0),
+            "out_for_delivery": fulfillment_counts.get("Out_For_Delivery", 0),
+            "delivered": fulfillment_counts.get("Delivered", 0),
+            "cancelled": fulfillment_counts.get("Cancelled", 0),
+            "pending_payment": payment_counts.get("PENDING", 0),
+            "paid": payment_counts.get("PAID", 0),
+            "failed_payment": payment_counts.get("FAILED", 0),
+            "refunded": payment_counts.get("REFUNDED", 0),
+            "total_revenue": total_revenue,
+        }

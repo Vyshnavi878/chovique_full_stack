@@ -6,7 +6,6 @@ from app.models.category import Category
 from app.models.contact import ContactMessage
 from app.models.coupon import Coupon, CouponEligibilityRule, CouponUser, CouponProduct, CouponCategory, CouponUsage
 from app.models.faq import FAQ
-from app.models.inventory import InventoryLog
 from app.models.notification import Notification
 from app.models.offline_sale import OfflineSale
 from app.models.order import Order, OrderItem, OrderSequence
