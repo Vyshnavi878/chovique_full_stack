@@ -1,4 +1,4 @@
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, update, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.notification import Notification
 
@@ -33,7 +33,7 @@ class NotificationRepository:
         await self.db.execute(
             update(Notification)
             .where(Notification.id == notification_id, Notification.user_id == user_id)
-            .values(read=True)
+            .values(read=True, is_read=True)
         )
         await self.db.commit()
         return await self.get_by_id(notification_id)
@@ -45,3 +45,110 @@ class NotificationRepository:
         )
         await self.db.commit()
         return result.rowcount > 0
+
+    # ======================================================
+    # ADMIN NOTIFICATIONS
+    # ======================================================
+
+    async def get_admin_notifications(
+        self,
+        admin_id: str,
+        type_filter: str | None = None,
+        is_read_filter: bool | None = None,
+        page: int = 1,
+        limit: int = 20,
+    ) -> tuple[list[Notification], int]:
+        query = select(Notification).where(
+            (Notification.admin_id == admin_id) | (Notification.admin_id.is_(None))
+        )
+
+        if type_filter and type_filter.lower() != 'all':
+            query = query.where(func.lower(Notification.type) == type_filter.lower())
+
+        if is_read_filter is not None:
+            query = query.where(Notification.is_read == is_read_filter)
+
+        # Count total
+        count_q = select(func.count()).select_from(query.subquery())
+        total = (await self.db.execute(count_q)).scalar() or 0
+
+        # Paginate
+        query = query.order_by(Notification.created_at.desc()).offset((page - 1) * limit).limit(limit)
+        result = await self.db.execute(query)
+        items = list(result.scalars().all())
+
+        return items, total
+
+    async def get_admin_unread_count(self, admin_id: str) -> int:
+        query = select(func.count(Notification.id)).where(
+            ((Notification.admin_id == admin_id) | (Notification.admin_id.is_(None))),
+            Notification.is_read == False
+        )
+        result = await self.db.execute(query)
+        return result.scalar() or 0
+
+    async def mark_admin_read(self, notification_id: str, admin_id: str) -> Notification | None:
+        query = select(Notification).where(
+            Notification.id == notification_id,
+            (Notification.admin_id == admin_id) | (Notification.admin_id.is_(None))
+        )
+        res = await self.db.execute(query)
+        notif = res.scalar_one_or_none()
+        if notif:
+            notif.is_read = True
+            notif.read = True
+            await self.db.commit()
+            await self.db.refresh(notif)
+        return notif
+
+    async def mark_admin_read_all(self, admin_id: str) -> int:
+        stmt = (
+            update(Notification)
+            .where(
+                (Notification.admin_id == admin_id) | (Notification.admin_id.is_(None)),
+                Notification.is_read == False
+            )
+            .values(is_read=True, read=True)
+        )
+        res = await self.db.execute(stmt)
+        await self.db.commit()
+        return res.rowcount
+
+    async def create_admin_notification_if_not_exists(
+        self,
+        admin_id: str | None,
+        type: str,
+        title: str,
+        message: str,
+        related_entity_type: str | None = None,
+        related_entity_id: str | None = None,
+    ) -> Notification | None:
+        # Check duplicate
+        if related_entity_type and related_entity_id:
+            check_q = select(Notification).where(
+                Notification.type == type,
+                Notification.related_entity_type == related_entity_type,
+                Notification.related_entity_id == related_entity_id,
+            )
+            if admin_id:
+                check_q = check_q.where(Notification.admin_id == admin_id)
+
+            existing = (await self.db.execute(check_q)).scalar_one_or_none()
+            if existing:
+                return existing
+
+        notif = Notification(
+            admin_id=admin_id,
+            type=type,
+            title=title,
+            message=message,
+            text=message,
+            related_entity_type=related_entity_type,
+            related_entity_id=related_entity_id,
+            is_read=False,
+            read=False,
+        )
+        self.db.add(notif)
+        await self.db.commit()
+        await self.db.refresh(notif)
+        return notif

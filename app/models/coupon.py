@@ -13,6 +13,7 @@ class Coupon(Base):
     name = Column(String(100), nullable=True)
     description = Column(Text, nullable=False)
     
+    coupon_type = Column(String(50), default="CUSTOMER", nullable=False) # CUSTOMER or INFLUENCER
     discount_type = Column(String(50), default="PERCENTAGE", nullable=False) 
     
     discount_percent = Column(Float, default=0.0, nullable=False)
@@ -31,11 +32,11 @@ class Coupon(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
-    rules = relationship("CouponEligibilityRule", back_populates="coupon", cascade="all, delete-orphan")
-    users = relationship("CouponUser", back_populates="coupon", cascade="all, delete-orphan")
-    products = relationship("CouponProduct", back_populates="coupon", cascade="all, delete-orphan")
-    categories = relationship("CouponCategory", back_populates="coupon", cascade="all, delete-orphan")
-    usages = relationship("CouponUsage", back_populates="coupon", cascade="all, delete-orphan")
+    rules = relationship("CouponEligibilityRule", back_populates="coupon", cascade="all, delete-orphan", lazy="selectin")
+    users = relationship("CouponUser", back_populates="coupon", cascade="all, delete-orphan", lazy="selectin")
+    products = relationship("CouponProduct", back_populates="coupon", cascade="all, delete-orphan", lazy="selectin")
+    categories = relationship("CouponCategory", back_populates="coupon", cascade="all, delete-orphan", lazy="selectin")
+    usages = relationship("CouponUsage", back_populates="coupon", cascade="all, delete-orphan", lazy="selectin")
 
 
 class CouponEligibilityRule(Base):

@@ -1,6 +1,7 @@
 import datetime
 from datetime import timezone
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.coupon import Coupon, CouponEligibilityRule, CouponProduct, CouponCategory
 
@@ -39,7 +40,14 @@ class CouponRepository:
 
     async def get_by_code(self, code: str) -> Coupon | None:
         result = await self.db.execute(
-            select(Coupon).where(Coupon.code == code.upper())
+            select(Coupon)
+            .options(
+                selectinload(Coupon.rules),
+                selectinload(Coupon.products),
+                selectinload(Coupon.categories),
+                selectinload(Coupon.usages),
+            )
+            .where(Coupon.code == code.upper())
         )
         coupon = result.scalar_one_or_none()
         if coupon and self._check_and_deactivate(coupon):
@@ -52,7 +60,16 @@ class CouponRepository:
         return [c for c in coupons if c.is_active]
 
     async def get_all(self) -> list[Coupon]:
-        result = await self.db.execute(select(Coupon).order_by(Coupon.created_at.desc()))
+        result = await self.db.execute(
+            select(Coupon)
+            .options(
+                selectinload(Coupon.rules),
+                selectinload(Coupon.products),
+                selectinload(Coupon.categories),
+                selectinload(Coupon.usages),
+            )
+            .order_by(Coupon.created_at.desc())
+        )
         coupons = list(result.scalars().all())
         updated = False
         for c in coupons:
@@ -65,7 +82,12 @@ class CouponRepository:
         return coupons
 
     async def create(self, **kwargs) -> Coupon:
-        kwargs["code"] = kwargs["code"].upper()
+        code_clean = kwargs["code"].upper()
+        existing = await self.get_by_code(code_clean)
+        if existing:
+            raise ValueError(f"A coupon with code '{code_clean}' already exists.")
+
+        kwargs["code"] = code_clean
         if "expires_at" in kwargs and kwargs["expires_at"]:
             kwargs["expires_at"] = self._parse_expires_at(kwargs["expires_at"])
         if "start_at" in kwargs and kwargs["start_at"]:
@@ -102,8 +124,7 @@ class CouponRepository:
                     self.db.add(CouponCategory(coupon_id=coupon.id, category_id=str(cid)))
 
         await self.db.commit()
-        await self.db.refresh(coupon)
-        return coupon
+        return await self.get_by_code(code_clean)
 
     async def update(self, code: str, **kwargs) -> Coupon | None:
         coupon = await self.get_by_code(code)

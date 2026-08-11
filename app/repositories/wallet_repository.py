@@ -79,3 +79,27 @@ class WalletRepository:
             .where(CoinTransaction.order_id == order_id)
         )
         return list(result.scalars().all())
+
+    async def get_recent_all_transactions(self, limit: int = 50) -> List[dict]:
+        from app.models.user import User
+        result = await self.db.execute(
+            select(CoinTransaction, User)
+            .outerjoin(User, CoinTransaction.user_id == User.id)
+            .order_by(CoinTransaction.created_at.desc())
+            .limit(limit)
+        )
+        items = []
+        for tx, user in result.all():
+            dt_str = tx.created_at.strftime("%Y-%m-%d") if tx.created_at else ""
+            items.append({
+                "id": tx.id,
+                "date": dt_str,
+                "customer_id": tx.user_id,
+                "customer_name": user.full_name if user else "Customer",
+                "customer_email": user.email if user else "",
+                "coins": tx.coins,
+                "type": tx.type,
+                "reason": tx.description or "Adjustment",
+                "performed_by": "Admin" if tx.type in ("ADJUSTMENT", "MANUAL") else "System",
+            })
+        return items

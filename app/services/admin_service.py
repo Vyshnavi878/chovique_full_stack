@@ -8,11 +8,12 @@ from datetime import date, datetime
 from typing import Optional
 
 from fastapi import UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import func, select, inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
 from app.integrations.resend import resend_email
+from app.models.coupon import Coupon
 from app.models.offline_sale import OfflineSale
 from app.models.order import Order
 from app.models.product import Product
@@ -60,6 +61,7 @@ from app.schemas.admin import (
     CustomerListPaginatedResponse,
     CustomerCoinsResponse,
 )
+from app.schemas.coupon import CouponAdminResponse
 from app.schemas.home import BannerResponse, ContactInfoResponse, StatsResponse, TestimonialResponse
 from app.schemas.order import OrderResponse
 from app.schemas.ticket import SupportTicketResponse
@@ -399,59 +401,81 @@ class AdminService:
         usage_rows = (await self.db.execute(usage_counts_q)).all()
         usage_map = {row.coupon_id: row.cnt for row in usage_rows}
 
-        results = []
-        for c in coupons:
-            # Resolve eligibility rule and applicability from related objects
-            eligibility_rule = "ALL_USERS"
-            eligibility_value = None
-            if c.rules:
-                rule = c.rules[0]
+    def _format_coupon_admin_response(self, c: Coupon, usage_count: int = 0) -> CouponAdminResponse:
+        state = inspect(c)
+        unloaded = state.unloaded if state else set()
+
+        eligibility_rule = "ALL_USERS"
+        eligibility_value = None
+        if "rules" not in unloaded:
+            rules = getattr(c, "rules", [])
+            if rules:
+                rule = rules[0]
                 eligibility_rule = rule.rule_type
                 eligibility_value = rule.rule_value
 
-            applicability = "ENTIRE_STORE"
-            applicable_ids: list[str] = []
-            if c.products:
-                applicability = "SPECIFIC_PRODUCTS"
-                applicable_ids = [cp.product_id for cp in c.products]
-            elif c.categories:
-                applicability = "SPECIFIC_CATEGORIES"
-                applicable_ids = [cc.category_id for cc in c.categories]
+        applicability = "ENTIRE_STORE"
+        applicable_ids: list[str] = []
+        if "products" not in unloaded and getattr(c, "products", None):
+            applicability = "SPECIFIC_PRODUCTS"
+            applicable_ids = [cp.product_id for cp in c.products]
+        elif "categories" not in unloaded and getattr(c, "categories", None):
+            applicability = "SPECIFIC_CATEGORIES"
+            applicable_ids = [cc.category_id for cc in c.categories]
 
-            results.append(CouponAdminResponse(
-                id=c.id,
-                code=c.code,
-                name=c.name,
-                description=c.description,
-                discount_type=c.discount_type,
-                discount_percent=c.discount_percent,
-                discount_amount=c.discount_amount,
-                maximum_discount_amount=c.maximum_discount_amount,
-                minimum_order_amount=c.minimum_order_amount,
-                start_at=c.start_at,
-                expires_at=c.expires_at,
-                usage_limit=c.usage_limit,
-                per_user_usage_limit=c.per_user_usage_limit,
-                is_active=c.is_active,
-                created_at=c.created_at,
-                eligibility_rule=eligibility_rule,
-                eligibility_value=eligibility_value,
-                applicability=applicability,
-                applicable_ids=applicable_ids,
-                usage_count=usage_map.get(c.id, 0),
-            ))
+        return CouponAdminResponse(
+            id=c.id,
+            code=c.code,
+            name=c.name,
+            description=c.description or "",
+            coupon_type=getattr(c, "coupon_type", "CUSTOMER") or "CUSTOMER",
+            discount_type=c.discount_type or "PERCENTAGE",
+            discount_percent=c.discount_percent or 0.0,
+            discount_amount=c.discount_amount or 0.0,
+            maximum_discount_amount=c.maximum_discount_amount or 0.0,
+            minimum_order_amount=c.minimum_order_amount or 0.0,
+            start_at=c.start_at,
+            expires_at=c.expires_at,
+            usage_limit=c.usage_limit or 0,
+            per_user_usage_limit=c.per_user_usage_limit or 1,
+            is_active=c.is_active if c.is_active is not None else True,
+            created_at=c.created_at,
+            eligibility_rule=eligibility_rule,
+            eligibility_value=eligibility_value,
+            applicability=applicability,
+            applicable_ids=applicable_ids,
+            usage_count=usage_count,
+        )
 
-        return results
+    async def get_coupons(self) -> list[CouponAdminResponse]:
+        from app.repositories.coupon_repository import CouponRepository
+        coupon_repo = CouponRepository(self.db)
+        coupons = await coupon_repo.get_all()
+
+        from app.models.coupon import CouponUsage
+        from sqlalchemy import func
+        usage_res = await self.db.execute(
+            select(CouponUsage.coupon_id, func.count(CouponUsage.id).label("cnt"))
+            .group_by(CouponUsage.coupon_id)
+        )
+        usage_rows = usage_res.all()
+        usage_map = {row.coupon_id: row.cnt for row in usage_rows}
+
+        return [self._format_coupon_admin_response(c, usage_map.get(c.id, 0)) for c in coupons]
 
     async def create_coupon(self, data):
         from app.repositories.coupon_repository import CouponRepository
         coupon_repo = CouponRepository(self.db)
-        return await coupon_repo.create(**data.model_dump())
-        
+        c = await coupon_repo.create(**data.model_dump())
+        return self._format_coupon_admin_response(c)
+
     async def update_coupon(self, code: str, data):
         from app.repositories.coupon_repository import CouponRepository
         coupon_repo = CouponRepository(self.db)
-        return await coupon_repo.update(code, **data.model_dump(exclude_unset=True))
+        c = await coupon_repo.update(code, **data.model_dump(exclude_unset=True))
+        if not c:
+            return None
+        return self._format_coupon_admin_response(c)
 
     async def get_contact_messages(self) -> list:
         # TODO: Implement contact form submission tracking in a DB table

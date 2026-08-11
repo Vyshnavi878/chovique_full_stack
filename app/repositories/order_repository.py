@@ -108,6 +108,25 @@ class OrderRepository:
         else:
             await self.db.flush()
 
+        try:
+            from app.services.notification_service import NotificationService
+            notif_service = NotificationService(self.db)
+            await notif_service.notify_new_order(order.id, order.id, order.total)
+            if coupon_code:
+                await notif_service.notify_coupon_usage(coupon_code, order.id)
+            
+            # Check stock levels for low stock alerts
+            for item_info in items_data:
+                pid = item_info.get("product_id")
+                if pid:
+                    from app.models.product import Product
+                    prod_res = await self.db.execute(select(Product).where(Product.id == pid))
+                    prod = prod_res.scalar_one_or_none()
+                    if prod and prod.stock <= 5:
+                        await notif_service.notify_low_stock(prod.id, prod.name, prod.stock)
+        except Exception:
+            pass
+
         # Re-fetch with loaded items and product relationships
         return await self.get_by_id(order.id)
 

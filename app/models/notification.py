@@ -9,12 +9,19 @@ class Notification(Base):
     __tablename__ = "notifications"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    text = Column(Text, nullable=False)
-    read = Column(Boolean, default=False, nullable=False)
+    admin_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     type = Column(String(50), default="general", nullable=False)
+    title = Column(String(200), nullable=True)
+    message = Column(Text, nullable=True)
+    text = Column(Text, nullable=True)
+    related_entity_type = Column(String(50), nullable=True)
+    related_entity_id = Column(String(50), nullable=True)
     reference_id = Column(String(100), nullable=True)
+    is_read = Column(Boolean, default=False, nullable=False)
+    read = Column(Boolean, default=False, nullable=False)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    user = relationship("User")
+    admin = relationship("User", foreign_keys=[admin_id])
+    user = relationship("User", foreign_keys=[user_id])

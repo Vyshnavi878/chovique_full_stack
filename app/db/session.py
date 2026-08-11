@@ -105,6 +105,17 @@ async def init_db() -> None:
             "ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS user_id VARCHAR(36);",
             "ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'approved';",
             "ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP;",
+            # Notifications
+            "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS admin_id VARCHAR(36);",
+            "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS title VARCHAR(200);",
+            "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS message TEXT;",
+            "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS related_entity_type VARCHAR(50);",
+            "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS related_entity_id VARCHAR(50);",
+            "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_read BOOLEAN NOT NULL DEFAULT FALSE;",
+            "ALTER TABLE notifications ALTER COLUMN user_id DROP NOT NULL;",
+            "ALTER TABLE notifications ALTER COLUMN text DROP NOT NULL;",
+            # Users
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;",
             # Cleanup removed Inventory module table
             "DROP TABLE IF EXISTS inventory_logs CASCADE;",
         ]

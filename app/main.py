@@ -58,10 +58,10 @@ async def lifespan(app: FastAPI):
                     except Exception:
                         pass
                 try:
-                    await autocommit_conn.execute(text("ALTER TABLE products ALTER COLUMN badge TYPE VARCHAR(50) USING badge::text;"))
-                except Exception:
-                    pass
-            logger.info("Database auto-migrations executed successfully.")
+                    await autocommit_conn.execute(text("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS coupon_type VARCHAR(50) DEFAULT 'CUSTOMER';"))
+                except Exception as ex:
+                    logger.warning("Coupons migration note: %s", ex)
+                logger.info("Database auto-migrations executed successfully.")
     except Exception as e:
         logger.warning("Database migration note: %s", e)
 

@@ -22,6 +22,13 @@ class UserRepository:
 
         await self.db.refresh(user)
 
+        if user.role != "admin" and user.role != "superadmin":
+            try:
+                from app.services.notification_service import NotificationService
+                await NotificationService(self.db).notify_new_customer(user.id, user.full_name or user.email)
+            except Exception:
+                pass
+
         return user
 
     # ==========================================================

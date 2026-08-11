@@ -21,6 +21,7 @@ class UserCouponResponse(BaseModel):
     code: str
     name: Optional[str] = None
     description: str = ""
+    coupon_type: str = "CUSTOMER"
     discount_type: str = "PERCENTAGE"
     discount_percent: float = 0.0
     discount_amount: float = 0.0
@@ -37,14 +38,15 @@ class UserCouponResponse(BaseModel):
 class CouponCreate(BaseModel):
     code: str
     name: Optional[str] = None
-    description: str
+    description: str = ""
+    coupon_type: str = "CUSTOMER" # CUSTOMER or INFLUENCER
     discount_type: str = "PERCENTAGE"
     discount_percent: float = 0.0
     discount_amount: float = 0.0
     maximum_discount_amount: float = 0.0
     minimum_order_amount: float = 0.0
     start_at: Optional[str] = None
-    expires_at: str  # Required — coupon must have an expiry date
+    expires_at: Optional[str] = None
     usage_limit: int = 0
     per_user_usage_limit: int = 1
     is_active: bool = True
@@ -55,19 +57,19 @@ class CouponCreate(BaseModel):
     applicability: str = "ENTIRE_STORE"
     applicable_ids: List[str] = []
 
+    @field_validator("start_at", "expires_at", mode="before")
+    @classmethod
+    def clean_empty_date_strings(cls, v):
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        return v
+
     @field_validator("code")
     @classmethod
     def code_must_not_be_empty(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError("Coupon code is required and cannot be empty.")
         return v.strip().upper()
-
-    @field_validator("expires_at")
-    @classmethod
-    def expires_at_must_not_be_empty(cls, v: str) -> str:
-        if not v or not v.strip():
-            raise ValueError("Expiry date is required and cannot be empty.")
-        return v
 
     @field_validator("discount_percent")
     @classmethod
@@ -87,6 +89,7 @@ class CouponCreate(BaseModel):
 class CouponUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    coupon_type: Optional[str] = None
     discount_type: Optional[str] = None
     discount_percent: Optional[float] = None
     discount_amount: Optional[float] = None
@@ -110,6 +113,7 @@ class CouponAdminResponse(BaseModel):
     code: str
     name: Optional[str] = None
     description: str
+    coupon_type: str = "CUSTOMER"
     discount_type: str
     discount_percent: float
     discount_amount: float

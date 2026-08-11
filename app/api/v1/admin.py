@@ -2,6 +2,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,16 +37,206 @@ from app.schemas.admin import (
 )
 from app.schemas.home import BannerResponse, ContactInfoResponse, StatsResponse, TestimonialResponse
 from app.schemas.order import OrderResponse
+from app.schemas.reports import ReportQueryRequest, ReportResponse
 from app.schemas.ticket import SupportTicketResponse
 from app.schemas.user import SystemUserResponse
+from app.services.report_service import ReportService
+from app.services.excel_report_service import ExcelReportService
+from app.services.pdf_report_service import PdfReportService
+from app.services.csv_report_service import CsvReportService
 from app.schemas.category import AdminCategoryResponse, CategoryUpdate
 from app.services.admin_service import AdminService
 from app.schemas.wallet import RewardSettingsSchema, CoinTransactionResponse, AdminCoinAdjustmentPayload
 from app.services.wallet_service import WalletService
+from app.models.audit_log import AuditLog
+from app.schemas.admin_profile import AdminProfileResponse, AdminProfileUpdateRequest
+from sqlalchemy import select, func, and_
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["Admin Module"])
+
+
+# ======================================================
+# ADMIN MY PROFILE
+# ======================================================
+
+@router.get("/profile", response_model=AdminProfileResponse, summary="Get authenticated admin profile")
+async def get_admin_profile(
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    return AdminProfileResponse.model_validate(current_user)
+
+
+@router.put("/profile", response_model=AdminProfileResponse, summary="Update authenticated admin profile")
+async def update_admin_profile(
+    payload: AdminProfileUpdateRequest,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    # Check email uniqueness against other users
+    if payload.email.lower() != current_user.email.lower():
+        existing = await db.execute(
+            select(User).where(func.lower(User.email) == payload.email.lower(), User.id != current_user.id)
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email address is already registered by another account.",
+            )
+
+    # Perform updates (strictly full_name, email, phone, address — NEVER role/permissions/password)
+    current_user.full_name = payload.full_name.strip()
+    current_user.email = payload.email.lower().strip()
+    current_user.phone = payload.phone.strip()
+    current_user.address = payload.address.strip()
+
+    # Create Audit Log record & Activity Log
+    audit_entry = AuditLog(
+        user_id=current_user.id,
+        action="UPDATE_ADMIN_PROFILE",
+        resource="admin_profile",
+        details=f"Admin updated profile details: Name='{current_user.full_name}', Email='{current_user.email}', Phone='{current_user.phone}'",
+    )
+    db.add(audit_entry)
+
+    await log_admin_activity(
+        db=db,
+        admin_id=current_user.id,
+        action="UPDATED_PROFILE",
+        module="profile",
+        description=f"Admin '{current_user.full_name}' updated profile info.",
+    )
+
+    await db.commit()
+    await db.refresh(current_user)
+    return AdminProfileResponse.model_validate(current_user)
+
+
+# ======================================================
+# ADMIN CHANGE PASSWORD
+# ======================================================
+
+from app.core.security import verify_password, hash_password
+from app.models.refresh_token import RefreshToken
+from app.schemas.change_password import AdminChangePasswordRequest
+from sqlalchemy import delete
+
+
+@router.post("/change-password", summary="Change admin password")
+async def change_admin_password(
+    payload: AdminChangePasswordRequest,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    # 1. Verify current password using secure password hashing
+    if not current_user.hashed_password or not verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect.",
+        )
+
+    # 2. Reject if new password equals current password
+    if verify_password(payload.new_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password cannot be the same as your current password.",
+        )
+
+    # 3. Hash new password securely
+    new_hash = hash_password(payload.new_password)
+    current_user.hashed_password = new_hash
+
+    # 4. Invalidate existing sessions according to security policy
+    await db.execute(delete(RefreshToken).where(RefreshToken.user_id == current_user.id))
+
+    # 5. Create audit log & activity log
+    audit_entry = AuditLog(
+        user_id=current_user.id,
+        action="CHANGE_ADMIN_PASSWORD",
+        resource="security",
+        details=f"Admin {current_user.email} successfully changed password. Active refresh tokens invalidated.",
+    )
+    db.add(audit_entry)
+
+    await log_admin_activity(
+        db=db,
+        admin_id=current_user.id,
+        action="CHANGED_PASSWORD",
+        module="security",
+        description=f"Admin '{current_user.full_name}' ({current_user.email}) changed password.",
+    )
+
+    await db.commit()
+    return {"message": "Password changed successfully. Please log in again with your new password."}
+
+
+# ======================================================
+# ADMIN ACTIVITY LOGS (READ-ONLY)
+# ======================================================
+
+from app.schemas.admin_activity_log import ActivityLogListResponse
+from app.services.activity_log_service import ActivityLogService, log_admin_activity
+
+
+@router.get("/activity-logs", response_model=ActivityLogListResponse, summary="Get immutable admin activity logs")
+async def get_admin_activity_logs(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    module: Optional[str] = Query(None),
+    action: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = ActivityLogService(db)
+    return await service.get_activity_logs(
+        page=page,
+        limit=limit,
+        start_date=start_date,
+        end_date=end_date,
+        module=module,
+        action=action,
+        status=status,
+        search=search,
+    )
+
+
+# ======================================================
+# ADMIN LOGOUT
+# ======================================================
+
+from fastapi import Response
+
+
+@router.post("/logout", summary="Secure admin logout")
+async def admin_logout(
+    response: Response,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    # 1. Invalidate/revoke session in DB
+    await db.execute(delete(RefreshToken).where(RefreshToken.user_id == current_user.id))
+
+    # 2. Clear authentication cookies
+    response.delete_cookie(key="access_token")
+    response.delete_cookie(key="refresh_token")
+
+    # 3. Log activity
+    await log_admin_activity(
+        db=db,
+        admin_id=current_user.id,
+        action="LOGGED_OUT",
+        module="auth",
+        description=f"Admin '{current_user.full_name}' ({current_user.email}) logged out securely.",
+    )
+
+    await db.commit()
+    return {"message": "Logged out successfully."}
 
 
 # ======================================================
@@ -59,6 +250,655 @@ async def get_reward_settings(
 ):
     service = WalletService(db)
     return await service.get_reward_settings()
+
+
+# ======================================================
+# REPORTS & ANALYTICS EXPORTS
+# ======================================================
+
+@router.get("/reports/customers/export/excel", summary="Export customer report to Excel (admin only)")
+async def export_customers_excel(
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date YYYY-MM-DD"),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = ReportService(db)
+        start_dt, end_dt = service._parse_date_range(start_date, end_date)
+        
+        # Load summary KPIs
+        req = ReportQueryRequest(report_type="customers", start_date=start_date, end_date=end_date)
+        summary_res = await service.generate_report(req)
+        
+        # Get all records for range
+        query = (
+            select(
+                User.full_name,
+                User.email,
+                User.phone,
+                func.count(Order.id).label("orders_cnt"),
+                func.coalesce(func.sum(Order.total), 0.0).label("total_spent"),
+                User.created_at
+            )
+            .select_from(User)
+            .outerjoin(Order, and_(User.id == Order.user_id, Order.status != "CANCELLED", Order.status != "Cancelled"))
+            .where(User.created_at >= start_dt, User.created_at <= end_dt)
+            .group_by(User.id, User.full_name, User.email, User.phone, User.created_at)
+            .order_by(User.created_at.desc())
+        )
+        res = (await db.execute(query)).all()
+        
+        customers_data = []
+        for row in res:
+            customers_data.append([
+                row.full_name or "Unnamed Customer",
+                row.email,
+                row.phone or "N/A",
+                row.orders_cnt,
+                row.total_spent,
+                row.created_at.strftime("%Y-%m-%d") if row.created_at else ""
+            ])
+            
+        excel_buffer = ExcelReportService.generate_customer_report(
+            start_date=start_date,
+            end_date=end_date,
+            kpis=summary_res.kpi_summary,
+            customers=customers_data
+        )
+        
+        filename = f"customer_report_{start_date}_to_{end_date}.xlsx"
+        return StreamingResponse(
+            excel_buffer,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error("Customer Excel export failed: %s", e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to export customer report.")
+
+
+@router.get("/reports/customers/export/pdf", summary="Export customer report to PDF (admin only)")
+async def export_customers_pdf(
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date YYYY-MM-DD"),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = ReportService(db)
+        start_dt, end_dt = service._parse_date_range(start_date, end_date)
+        
+        # Load summary KPIs
+        req = ReportQueryRequest(report_type="customers", start_date=start_date, end_date=end_date)
+        summary_res = await service.generate_report(req)
+        
+        query = (
+            select(
+                User.full_name,
+                User.email,
+                User.phone,
+                func.count(Order.id).label("orders_cnt"),
+                func.coalesce(func.sum(Order.total), 0.0).label("total_spent"),
+                User.created_at
+            )
+            .select_from(User)
+            .outerjoin(Order, and_(User.id == Order.user_id, Order.status != "CANCELLED", Order.status != "Cancelled"))
+            .where(User.created_at >= start_dt, User.created_at <= end_dt)
+            .group_by(User.id, User.full_name, User.email, User.phone, User.created_at)
+            .order_by(User.created_at.desc())
+        )
+        res = (await db.execute(query)).all()
+        
+        customers_data = []
+        for row in res:
+            customers_data.append([
+                row.full_name or "Unnamed Customer",
+                row.email,
+                row.phone or "N/A",
+                str(row.orders_cnt),
+                f"₹{row.total_spent:,.2f}",
+                row.created_at.strftime("%Y-%m-%d") if row.created_at else ""
+            ])
+            
+        pdf_buffer = PdfReportService.generate_customer_report(
+            start_date=start_date,
+            end_date=end_date,
+            kpis=summary_res.kpi_summary,
+            customers=customers_data
+        )
+        
+        filename = f"customer_report_{start_date}_to_{end_date}.pdf"
+        return StreamingResponse(
+            pdf_buffer,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error("Customer PDF export failed: %s", e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to export customer report.")
+
+
+@router.get("/reports/customers/export/csv", summary="Export customer report to CSV (admin only)")
+async def export_customers_csv(
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date YYYY-MM-DD"),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = ReportService(db)
+        start_dt, end_dt = service._parse_date_range(start_date, end_date)
+        
+        query = (
+            select(
+                User.full_name,
+                User.email,
+                User.phone,
+                func.count(Order.id).label("orders_cnt"),
+                func.coalesce(func.sum(Order.total), 0.0).label("total_spent"),
+                User.created_at
+            )
+            .select_from(User)
+            .outerjoin(Order, and_(User.id == Order.user_id, Order.status != "CANCELLED", Order.status != "Cancelled"))
+            .where(User.created_at >= start_dt, User.created_at <= end_dt)
+            .group_by(User.id, User.full_name, User.email, User.phone, User.created_at)
+            .order_by(User.created_at.desc())
+        )
+        res = (await db.execute(query)).all()
+        
+        headers = ["Customer Name", "Email", "Phone", "Orders Placed", "Total Spend", "Joined Date"]
+        rows = []
+        for row in res:
+            rows.append([
+                row.full_name or "Unnamed Customer",
+                row.email,
+                row.phone or "N/A",
+                row.orders_cnt,
+                row.total_spent,
+                row.created_at.strftime("%Y-%m-%d") if row.created_at else ""
+            ])
+            
+        csv_buffer = CsvReportService.generate_csv(headers, rows)
+        filename = f"customer_report_{start_date}_to_{end_date}.csv"
+        return StreamingResponse(
+            csv_buffer,
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error("Customer CSV export failed: %s", e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to export customer report.")
+
+
+@router.get("/reports/orders/export/excel", summary="Export orders report to Excel (admin only)")
+async def export_orders_excel(
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date YYYY-MM-DD"),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = ReportService(db)
+        start_dt, end_dt = service._parse_date_range(start_date, end_date)
+        
+        query = (
+            select(Order, User)
+            .options(selectinload(Order.items))
+            .outerjoin(User, Order.user_id == User.id)
+            .where(Order.created_at >= start_dt, Order.created_at <= end_dt)
+            .order_by(Order.created_at.desc())
+        )
+        res = (await db.execute(query)).all()
+        
+        orders_data = []
+        for o, u in res:
+            cust_name = u.full_name if u else "Guest Customer"
+            cust_email = u.email if u else "N/A"
+            if not u and isinstance(o.shipping_address, dict):
+                cust_name = o.shipping_address.get("full_name") or o.shipping_address.get("name") or "Guest Customer"
+                cust_email = o.shipping_address.get("email") or "N/A"
+                
+            state = inspect(o)
+            items_cnt = len(o.items) if state and "items" not in state.unloaded and o.items else 1
+            
+            orders_data.append([
+                o.id,
+                cust_name,
+                cust_email,
+                o.created_at.strftime("%Y-%m-%d %H:%M") if o.created_at else "",
+                items_cnt,
+                o.subtotal or 0.0,
+                o.discount or 0.0,
+                o.shipping or 0.0,
+                o.tax or 0.0,
+                o.total or 0.0,
+                o.payment_status or "PENDING",
+                o.status or "Processing"
+            ])
+            
+        excel_buffer = ExcelReportService.generate_orders_report(
+            start_date=start_date,
+            end_date=end_date,
+            orders=orders_data
+        )
+        
+        filename = f"orders_report_{start_date}_to_{end_date}.xlsx"
+        return StreamingResponse(
+            excel_buffer,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error("Orders Excel export failed: %s", e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to export orders report.")
+
+
+@router.get("/reports/orders/export/pdf", summary="Export orders report to PDF (admin only)")
+async def export_orders_pdf(
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date YYYY-MM-DD"),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = ReportService(db)
+        start_dt, end_dt = service._parse_date_range(start_date, end_date)
+        
+        query = (
+            select(Order, User)
+            .options(selectinload(Order.items))
+            .outerjoin(User, Order.user_id == User.id)
+            .where(Order.created_at >= start_dt, Order.created_at <= end_dt)
+            .order_by(Order.created_at.desc())
+        )
+        res = (await db.execute(query)).all()
+        
+        orders_data = []
+        for o, u in res:
+            cust_name = u.full_name if u else "Guest"
+            cust_email = u.email if u else "N/A"
+            if not u and isinstance(o.shipping_address, dict):
+                cust_name = o.shipping_address.get("full_name") or o.shipping_address.get("name") or "Guest"
+                cust_email = o.shipping_address.get("email") or "N/A"
+                
+            state = inspect(o)
+            items_cnt = len(o.items) if state and "items" not in state.unloaded and o.items else 1
+            
+            orders_data.append([
+                o.id[:8],
+                cust_name,
+                cust_email,
+                o.created_at.strftime("%Y-%m-%d %H:%M") if o.created_at else "",
+                str(items_cnt),
+                f"₹{o.subtotal:,.2f}",
+                f"₹{o.discount:,.2f}",
+                f"₹{o.shipping:,.2f}",
+                f"₹{o.tax:,.2f}",
+                f"₹{o.total:,.2f}",
+                o.payment_status or "PENDING",
+                o.status or "Processing"
+            ])
+            
+        pdf_buffer = PdfReportService.generate_orders_report(
+            start_date=start_date,
+            end_date=end_date,
+            orders=orders_data
+        )
+        
+        filename = f"orders_report_{start_date}_to_{end_date}.pdf"
+        return StreamingResponse(
+            pdf_buffer,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error("Orders PDF export failed: %s", e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to export orders report.")
+
+
+@router.get("/reports/orders/export/csv", summary="Export orders report to CSV (admin only)")
+async def export_orders_csv(
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date YYYY-MM-DD"),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = ReportService(db)
+        start_dt, end_dt = service._parse_date_range(start_date, end_date)
+        
+        query = (
+            select(Order, User)
+            .options(selectinload(Order.items))
+            .outerjoin(User, Order.user_id == User.id)
+            .where(Order.created_at >= start_dt, Order.created_at <= end_dt)
+            .order_by(Order.created_at.desc())
+        )
+        res = (await db.execute(query)).all()
+        
+        headers = [
+            "Order ID", "Customer Name", "Customer Email", "Order Date", "Number of Items",
+            "Subtotal", "Discount", "Shipping", "Tax", "Total Amount", "Payment Status", "Order Status"
+        ]
+        
+        rows = []
+        for o, u in res:
+            cust_name = u.full_name if u else "Guest Customer"
+            cust_email = u.email if u else "N/A"
+            if not u and isinstance(o.shipping_address, dict):
+                cust_name = o.shipping_address.get("full_name") or o.shipping_address.get("name") or "Guest Customer"
+                cust_email = o.shipping_address.get("email") or "N/A"
+                
+            state = inspect(o)
+            items_cnt = len(o.items) if state and "items" not in state.unloaded and o.items else 1
+            
+            rows.append([
+                o.id,
+                cust_name,
+                cust_email,
+                o.created_at.strftime("%Y-%m-%d %H:%M") if o.created_at else "",
+                items_cnt,
+                o.subtotal or 0.0,
+                o.discount or 0.0,
+                o.shipping or 0.0,
+                o.tax or 0.0,
+                o.total or 0.0,
+                o.payment_status or "PENDING",
+                o.status or "Processing"
+            ])
+            
+        csv_buffer = CsvReportService.generate_csv(headers, rows)
+        filename = f"orders_report_{start_date}_to_{end_date}.csv"
+        return StreamingResponse(
+            csv_buffer,
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error("Orders CSV export failed: %s", e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to export orders report.")
+
+
+@router.get("/reports/products/export/excel", summary="Export product report to Excel (admin only)")
+async def export_products_excel(
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date YYYY-MM-DD"),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = ReportService(db)
+        start_dt, end_dt = service._parse_date_range(start_date, end_date)
+        
+        query = (
+            select(
+                Product.name,
+                Product.category,
+                func.coalesce(func.sum(OrderItem.quantity), 0).label("units_sold"),
+                func.count(distinct(Order.id)).label("total_orders"),
+                func.coalesce(func.sum(OrderItem.price * OrderItem.quantity), 0.0).label("revenue"),
+                Product.stock
+            )
+            .select_from(OrderItem)
+            .join(Product, OrderItem.product_id == Product.id)
+            .join(Order, OrderItem.order_id == Order.id)
+            .where(
+                Order.created_at >= start_dt,
+                Order.created_at <= end_dt,
+                Order.status != "CANCELLED",
+                Order.status != "Cancelled"
+            )
+            .group_by(Product.id, Product.name, Product.category, Product.stock)
+            .order_by(text("revenue DESC"))
+        )
+        res = (await db.execute(query)).all()
+        
+        products_data = []
+        for row in res:
+            products_data.append([
+                row.name,
+                row.category or "Gourmet Chocolates",
+                row.units_sold,
+                row.total_orders,
+                row.revenue,
+                0.0,  # ASP calculated inside Service
+                row.stock
+            ])
+            
+        excel_buffer = ExcelReportService.generate_products_report(
+            start_date=start_date,
+            end_date=end_date,
+            products=products_data
+        )
+        
+        filename = f"product_report_{start_date}_to_{end_date}.xlsx"
+        return StreamingResponse(
+            excel_buffer,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error("Product Excel export failed: %s", e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to export product report.")
+
+
+@router.get("/reports/products/export/csv", summary="Export product report to CSV (admin only)")
+async def export_products_csv(
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date YYYY-MM-DD"),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = ReportService(db)
+        start_dt, end_dt = service._parse_date_range(start_date, end_date)
+        
+        query = (
+            select(
+                Product.name,
+                Product.category,
+                func.coalesce(func.sum(OrderItem.quantity), 0).label("units_sold"),
+                func.count(distinct(Order.id)).label("total_orders"),
+                func.coalesce(func.sum(OrderItem.price * OrderItem.quantity), 0.0).label("revenue"),
+                Product.stock
+            )
+            .select_from(OrderItem)
+            .join(Product, OrderItem.product_id == Product.id)
+            .join(Order, OrderItem.order_id == Order.id)
+            .where(
+                Order.created_at >= start_dt,
+                Order.created_at <= end_dt,
+                Order.status != "CANCELLED",
+                Order.status != "Cancelled"
+            )
+            .group_by(Product.id, Product.name, Product.category, Product.stock)
+            .order_by(text("revenue DESC"))
+        )
+        res = (await db.execute(query)).all()
+        
+        headers = ["Product Name", "Category", "Units Sold", "Total Orders", "Revenue", "Average Selling Price", "Stock Status"]
+        rows = []
+        for row in res:
+            avg_price = row.revenue / row.units_sold if row.units_sold > 0 else 0.0
+            rows.append([
+                row.name,
+                row.category or "Gourmet Chocolates",
+                row.units_sold,
+                row.total_orders,
+                row.revenue,
+                avg_price,
+                row.stock
+            ])
+            
+        csv_buffer = CsvReportService.generate_csv(headers, rows)
+        filename = f"product_report_{start_date}_to_{end_date}.csv"
+        return StreamingResponse(
+            csv_buffer,
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error("Product CSV export failed: %s", e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to export product report.")
+
+
+@router.get("/reports/analytics/export/excel", summary="Export analytics report to Excel (admin only)")
+async def export_analytics_excel(
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date YYYY-MM-DD"),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = ReportService(db)
+        start_dt, end_dt = service._parse_date_range(start_date, end_date)
+        
+        # Aggregate detailed counts & sums
+        ord_q = select(
+            func.coalesce(func.sum(Order.total), 0.0),
+            func.count(Order.id),
+            func.coalesce(func.sum(Order.discount), 0.0),
+            func.coalesce(func.sum(Order.tax), 0.0),
+            func.coalesce(func.sum(Order.shipping), 0.0)
+        ).where(Order.created_at >= start_dt, Order.created_at <= end_dt, Order.status != "CANCELLED", Order.status != "Cancelled")
+        
+        tot_rev, ord_cnt, disc_tot, tax_tot, ship_tot = (await db.execute(ord_q)).first()
+        
+        cust_q = select(func.count(User.id)).where(User.created_at >= start_dt, User.created_at <= end_dt, User.role == "customer")
+        cust_cnt = (await db.execute(cust_q)).scalar() or 0
+        
+        total_cust_q = select(func.count(User.id)).where(User.role == "customer")
+        total_cust = (await db.execute(total_cust_q)).scalar() or 0
+        
+        prod_q = select(func.coalesce(func.sum(OrderItem.quantity), 0)).join(Order, OrderItem.order_id == Order.id).where(Order.created_at >= start_dt, Order.created_at <= end_dt, Order.status != "CANCELLED", Order.status != "Cancelled")
+        prod_cnt = (await db.execute(prod_q)).scalar() or 0
+        
+        avg_val = tot_rev / ord_cnt if ord_cnt > 0 else 0.0
+        
+        # Prepare data dict
+        summary_data = {
+            "total_revenue": tot_rev,
+            "total_orders": ord_cnt,
+            "total_customers": total_cust,
+            "new_customers": cust_cnt,
+            "repeat_customers": max(0, total_cust - cust_cnt),
+            "avg_order_value": avg_val,
+            "total_products_sold": prod_cnt,
+            "total_discounts": disc_tot,
+            "total_tax": tax_tot,
+            "total_shipping_revenue": ship_tot,
+            "daily_trend": []
+        }
+        
+        # Generate daily trend tuples
+        curr = start_dt.date()
+        end_d = end_dt.date()
+        while curr <= end_d:
+            d_start = datetime.combine(curr, datetime.min.time())
+            d_end = datetime.combine(curr, datetime.max.time())
+            day_q = select(func.count(Order.id), func.coalesce(func.sum(Order.total), 0.0)).where(Order.created_at >= d_start, Order.created_at <= d_end, Order.status != "CANCELLED", Order.status != "Cancelled")
+            d_cnt, d_rev = (await db.execute(day_q)).first()
+            summary_data["daily_trend"].append((curr.strftime("%Y-%m-%d"), d_cnt or 0, d_rev or 0.0))
+            curr += timedelta(days=1)
+            
+        excel_buffer = ExcelReportService.generate_analytics_report(
+            start_date=start_date,
+            end_date=end_date,
+            summary_data=summary_data
+        )
+        
+        filename = f"analytics_report_{start_date}_to_{end_date}.xlsx"
+        return StreamingResponse(
+            excel_buffer,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error("Analytics Excel export failed: %s", e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to export analytics report.")
+
+
+@router.get("/reports/analytics/export/pdf", summary="Export analytics report to PDF (admin only)")
+async def export_analytics_pdf(
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date YYYY-MM-DD"),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = ReportService(db)
+        start_dt, end_dt = service._parse_date_range(start_date, end_date)
+        
+        ord_q = select(
+            func.coalesce(func.sum(Order.total), 0.0),
+            func.count(Order.id),
+            func.coalesce(func.sum(Order.discount), 0.0),
+            func.coalesce(func.sum(Order.tax), 0.0),
+            func.coalesce(func.sum(Order.shipping), 0.0)
+        ).where(Order.created_at >= start_dt, Order.created_at <= end_dt, Order.status != "CANCELLED", Order.status != "Cancelled")
+        
+        tot_rev, ord_cnt, disc_tot, tax_tot, ship_tot = (await db.execute(ord_q)).first()
+        
+        cust_q = select(func.count(User.id)).where(User.created_at >= start_dt, User.created_at <= end_dt, User.role == "customer")
+        cust_cnt = (await db.execute(cust_q)).scalar() or 0
+        
+        total_cust_q = select(func.count(User.id)).where(User.role == "customer")
+        total_cust = (await db.execute(total_cust_q)).scalar() or 0
+        
+        prod_q = select(func.coalesce(func.sum(OrderItem.quantity), 0)).join(Order, OrderItem.order_id == Order.id).where(Order.created_at >= start_dt, Order.created_at <= end_dt, Order.status != "CANCELLED", Order.status != "Cancelled")
+        prod_cnt = (await db.execute(prod_q)).scalar() or 0
+        
+        avg_val = tot_rev / ord_cnt if ord_cnt > 0 else 0.0
+        
+        summary_data = {
+            "total_revenue": tot_rev,
+            "total_orders": ord_cnt,
+            "total_customers": total_cust,
+            "new_customers": cust_cnt,
+            "repeat_customers": max(0, total_cust - cust_cnt),
+            "avg_order_value": avg_val,
+            "total_products_sold": prod_cnt,
+            "total_discounts": disc_tot,
+            "total_tax": tax_tot,
+            "total_shipping_revenue": ship_tot,
+        }
+        
+        pdf_buffer = PdfReportService.generate_analytics_report(
+            start_date=start_date,
+            end_date=end_date,
+            summary_data=summary_data
+        )
+        
+        filename = f"analytics_report_{start_date}_to_{end_date}.pdf"
+        return StreamingResponse(
+            pdf_buffer,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error("Analytics PDF export failed: %s", e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to export analytics report.")
 
 
 @router.put("/rewards/settings", response_model=RewardSettingsSchema, summary="Update reward system settings")
@@ -83,6 +923,75 @@ async def admin_coin_adjustment(
         coins=payload.coins,
         reason=payload.reason,
     )
+
+
+@router.get("/rewards/history", summary="Get recent reward coin transactions (admin only)")
+async def get_reward_history(
+    limit: int = 50,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = WalletService(db)
+    return await service.get_recent_admin_adjustments(limit=limit)
+
+
+# ======================================================
+# REPORTS & ANALYTICS
+# ======================================================
+
+@router.get("/reports", response_model=ReportResponse, summary="Generate business reports (admin only)")
+async def generate_report(
+    report_type: str = Query(..., description="sales, orders, products, customers, coupons, reward_coins"),
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date YYYY-MM-DD"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=500),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        req = ReportQueryRequest(
+            report_type=report_type.lower(),
+            start_date=start_date,
+            end_date=end_date,
+            page=page,
+            limit=limit,
+        )
+        service = ReportService(db)
+        return await service.generate_report(req)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error("Report generation failed: %s", e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to generate report.")
+
+
+@router.get("/reports/export", summary="Export report as CSV (admin only)")
+async def export_report_csv(
+    report_type: str = Query(..., description="sales, orders, products, customers, coupons, reward_coins"),
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date YYYY-MM-DD"),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = ReportService(db)
+        csv_buffer = await service.export_report_csv(
+            report_type=report_type.lower(),
+            start_date=start_date,
+            end_date=end_date,
+        )
+        filename = f"chovique_{report_type}_report_{start_date}_to_{end_date}.csv"
+        return StreamingResponse(
+            csv_buffer,
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error("Report CSV export failed: %s", e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to export CSV report.")
 
 
 # ======================================================
@@ -154,11 +1063,14 @@ async def create_coupon(
     current_user: User = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
-    service = AdminService(db)
-    coupon = await service.create_coupon(payload)
-    if not coupon:
-        raise HTTPException(status_code=400, detail="Failed to create coupon")
-    return coupon
+    try:
+        service = AdminService(db)
+        coupon = await service.create_coupon(payload)
+        if not coupon:
+            raise HTTPException(status_code=400, detail="Failed to create coupon")
+        return coupon
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 @router.patch(
     "/coupons/{code}",
@@ -227,15 +1139,14 @@ async def update_product_stock(
     old_stock = product.stock
     await service.product_repo.update(product_id, stock=stock)
     
-    # Log inventory change
-    from app.repositories.inventory_repository import InventoryRepository
-    inventory_repo = InventoryRepository(db)
-    await inventory_repo.log_change(
-        product_id=product_id,
-        change_quantity=stock - old_stock,
-        reason=f"Manual admin adjustment by {current_user.email}",
-        notes=f"Stock updated to {stock}",
-        performed_by=current_user.id
+    # Log stock change to audit logs
+    from app.repositories.audit_log_repository import AuditLogRepository
+    audit_repo = AuditLogRepository(db)
+    await audit_repo.log(
+        action="update_product_stock",
+        user_id=current_user.id,
+        resource=f"product:{product_id}",
+        details=f"Stock adjusted from {old_stock} to {stock} by {current_user.email}",
     )
     return {"message": "Stock updated successfully", "stock": stock}
 

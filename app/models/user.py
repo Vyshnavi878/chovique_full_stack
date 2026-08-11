@@ -32,6 +32,7 @@ class User(Base):
     # Profile
     # ==========================
     phone = Column(String(20), nullable=True)
+    address = Column(Text, nullable=True)
     dob = Column(Date, nullable=True)
     gender = Column(String(20), nullable=True)
     avatar_url = Column(Text, nullable=True)
