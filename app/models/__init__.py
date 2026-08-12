@@ -11,6 +11,7 @@ from app.models.notification import Notification
 from app.models.offline_sale import OfflineSale
 from app.models.order import Order, OrderItem, OrderSequence
 from app.models.payment import Payment
+from app.models.platform_settings import PlatformSettings
 from app.models.product import Product
 from app.models.reel import InstagramReel
 from app.models.refresh_token import RefreshToken
@@ -19,6 +20,7 @@ from app.models.review import ProductReview
 from app.models.site_config import SiteConfig
 from app.models.testimonial import Testimonial
 from app.models.theme import ThemePreset
+from app.models.superadmin_notification import SuperadminNotification
 from app.models.ticket import SupportTicket
 from app.models.user import User
 from app.models.wallet import UserWallet, CoinTransaction

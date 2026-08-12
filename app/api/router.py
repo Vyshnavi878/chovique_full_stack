@@ -24,6 +24,14 @@ from app.api.v1 import (
     wishlist,
     theme,
     wallet,
+    superadmin_overview,
+    superadmin_revenue,
+    superadmin_sales,
+    superadmin_admins,
+    superadmin_audit_logs,
+    superadmin_theme,
+    superadmin_platform_settings,
+    superadmin_notifications,
 )
 from app.core.config import settings
 
@@ -48,4 +56,12 @@ api_router.include_router(contact.router)
 api_router.include_router(admin.router)
 api_router.include_router(admin_dashboard.router)
 api_router.include_router(admin_notifications.router)
+api_router.include_router(superadmin_overview.router)
+api_router.include_router(superadmin_revenue.router)
+api_router.include_router(superadmin_sales.router)
+api_router.include_router(superadmin_admins.router)
+api_router.include_router(superadmin_audit_logs.router)
+api_router.include_router(superadmin_theme.router)
+api_router.include_router(superadmin_platform_settings.router)
+api_router.include_router(superadmin_notifications.router)
 api_router.include_router(theme.router, prefix="/theme", tags=["Theme Builder"])
