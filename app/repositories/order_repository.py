@@ -141,6 +141,16 @@ class OrderRepository:
         )
         return list(result.scalars().all())
 
+    async def get_all_orders_for_admin(self) -> list[Order]:
+        result = await self.db.execute(
+            select(Order)
+            .options(
+                selectinload(Order.items).selectinload(OrderItem.product)
+            )
+            .order_by(Order.created_at.desc())
+        )
+        return list(result.scalars().all())
+
     async def get_by_id(self, order_id: str) -> Order | None:
         result = await self.db.execute(
             select(Order)

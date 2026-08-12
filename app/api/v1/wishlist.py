@@ -48,3 +48,14 @@ async def remove_from_wishlist(
 ):
     service = WishlistService(db)
     await service.remove_from_wishlist(current_user.id, product_id)
+
+
+@router.get("/check/{product_id}", response_model=dict, summary="Check whether a product is wishlisted")
+async def check_wishlist_status(
+    product_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = WishlistService(db)
+    is_wishlisted = await service.is_product_wishlisted(current_user.id, product_id)
+    return {"is_wishlisted": is_wishlisted}

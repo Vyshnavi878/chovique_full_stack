@@ -1,6 +1,6 @@
 import uuid
 from typing import List, Optional
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.wallet import UserWallet, CoinTransaction
 
@@ -60,16 +60,23 @@ class WalletRepository:
         return transaction
 
     async def get_transactions(
-        self, user_id: str, limit: int = 50, offset: int = 0
+        self, user_id: str, type_filter: Optional[str] = None, limit: int = 50, offset: int = 0
     ) -> List[CoinTransaction]:
-        result = await self.db.execute(
-            select(CoinTransaction)
-            .where(CoinTransaction.user_id == user_id)
-            .order_by(CoinTransaction.created_at.desc())
-            .offset(offset)
-            .limit(limit)
-        )
+        query = select(CoinTransaction).where(CoinTransaction.user_id == user_id)
+        if type_filter and type_filter.upper() != "ALL":
+            query = query.where(CoinTransaction.type == type_filter.upper())
+        query = query.order_by(CoinTransaction.created_at.desc()).offset(offset).limit(limit)
+        result = await self.db.execute(query)
         return list(result.scalars().all())
+
+    async def count_transactions(
+        self, user_id: str, type_filter: Optional[str] = None
+    ) -> int:
+        query = select(func.count(CoinTransaction.id)).where(CoinTransaction.user_id == user_id)
+        if type_filter and type_filter.upper() != "ALL":
+            query = query.where(CoinTransaction.type == type_filter.upper())
+        result = await self.db.execute(query)
+        return result.scalar() or 0
 
     async def get_order_transactions(
         self, order_id: str

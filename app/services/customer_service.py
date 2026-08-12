@@ -29,6 +29,7 @@ from app.schemas.user import (
     AvatarUploadResponse,
     CustomerAddressCreate,
     CustomerAddressResponse,
+    CustomerAddressUpdate,
     ProfileUpdatePayload,
     SupportNotificationResponse,
     UserResponse,
@@ -190,6 +191,32 @@ class CustomerService:
             phone=payload.phone,
             is_default=payload.isDefault,
         )
+
+        return CustomerAddressResponse(
+            id=addr.id,
+            title=addr.title,
+            name=addr.name,
+            street=addr.street,
+            city=addr.city,
+            state=addr.state,
+            zip=addr.zip,
+            phone=addr.phone,
+            isDefault=addr.is_default,
+        )
+
+    async def update_address(
+        self,
+        user_id: str,
+        address_id: str,
+        payload: CustomerAddressUpdate,
+    ) -> CustomerAddressResponse | None:
+        update_data = payload.model_dump(exclude_unset=True)
+        if "isDefault" in update_data:
+            update_data["is_default"] = update_data.pop("isDefault")
+
+        addr = await self.address_repo.update(address_id, user_id, **update_data)
+        if not addr:
+            return None
 
         return CustomerAddressResponse(
             id=addr.id,
@@ -457,8 +484,15 @@ class CustomerService:
         db_order = await self.order_repo.get_by_id(order.id)
         return self._format_order_response(db_order or order)
 
-    async def get_user_orders(self, user_id: str) -> list[OrderResponse]:
-        orders = await self.order_repo.get_user_orders(user_id)
+    async def get_user_orders(self, user_id: str, role: str = "customer") -> list[OrderResponse]:
+        if role in ["admin", "superadmin"]:
+            personal_orders = await self.order_repo.get_user_orders(user_id)
+            if personal_orders:
+                orders = personal_orders
+            else:
+                orders = await self.order_repo.get_all_orders_for_admin()
+        else:
+            orders = await self.order_repo.get_user_orders(user_id)
         return [self._format_order_response(o) for o in orders]
 
     async def get_order_by_id(self, order_id: str, user_id: str) -> OrderResponse | None:

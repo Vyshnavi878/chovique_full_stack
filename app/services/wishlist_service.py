@@ -50,3 +50,7 @@ class WishlistService:
     async def get_count(self, user_id: str) -> WishlistCountResponse:
         count = await self.wishlist_repo.get_count(user_id)
         return WishlistCountResponse(count=count)
+
+    async def is_product_wishlisted(self, user_id: str, product_id: str) -> bool:
+        items = await self.wishlist_repo.get_user_wishlist(user_id)
+        return any(i.product_id == product_id for i in items)

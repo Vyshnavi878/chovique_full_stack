@@ -1,5 +1,5 @@
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db
 from app.models.user import User
@@ -23,16 +23,28 @@ async def get_wallet(
     return await service.get_user_wallet_details(current_user.id)
 
 
-@router.get("/transactions", response_model=List[CoinTransactionResponse], summary="Get transaction history")
+@router.get("/transactions", summary="Get transaction history with filtering and pagination")
 async def get_transactions(
-    limit: int = 50,
-    offset: int = 0,
+    type: Optional[str] = Query(None, description="ALL, EARN, REDEEM, ADJUSTMENT"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
+    offset: Optional[int] = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     service = WalletService(db)
-    txs = await service.wallet_repo.get_transactions(current_user.id, limit=limit, offset=offset)
-    return [CoinTransactionResponse.model_validate(t) for t in txs]
+    calc_offset = offset if offset is not None else (page - 1) * limit
+    txs = await service.wallet_repo.get_transactions(current_user.id, type_filter=type, limit=limit, offset=calc_offset)
+    total = await service.wallet_repo.count_transactions(current_user.id, type_filter=type)
+    pages = (total + limit - 1) // limit if limit > 0 else 1
+    items = [CoinTransactionResponse.model_validate(t) for t in txs]
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "pages": pages,
+        "limit": limit
+    }
 
 
 @router.post("/calculate-redemption", response_model=CalculateRedemptionResponse, summary="Calculate allowed coin redemption for order preview")
