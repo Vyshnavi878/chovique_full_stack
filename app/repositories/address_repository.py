@@ -45,6 +45,27 @@ class AddressRepository:
         await self.db.commit()
         return result.rowcount > 0
 
+    async def update(self, address_id: str, user_id: str, **kwargs) -> CustomerAddress | None:
+        address = await self.get_by_id(address_id)
+        if not address or str(address.user_id) != str(user_id):
+            return None
+
+        if kwargs.get("is_default"):
+            # Unset default on existing user addresses
+            await self.db.execute(
+                update(CustomerAddress)
+                .where(CustomerAddress.user_id == user_id)
+                .values(is_default=False)
+            )
+
+        for k, v in kwargs.items():
+            if hasattr(address, k) and v is not None:
+                setattr(address, k, v)
+
+        await self.db.commit()
+        await self.db.refresh(address)
+        return address
+
     async def set_default(self, address_id: str, user_id: str) -> CustomerAddress | None:
         # Clear default flag on all addresses for this user
         await self.db.execute(

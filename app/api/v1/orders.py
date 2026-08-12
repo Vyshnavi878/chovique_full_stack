@@ -38,7 +38,7 @@ async def get_orders(
     db: AsyncSession = Depends(get_db),
 ):
     service = CustomerService(db)
-    return await service.get_user_orders(current_user.id)
+    return await service.get_user_orders(current_user.id, current_user.role)
 
 
 @router.get(
@@ -87,10 +87,40 @@ async def get_order_invoice(
     if cloud_url:
         order.invoice_url = cloud_url
         await db.commit()
-        return RedirectResponse(url=cloud_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
-        
     html = InvoiceService.generate_html_invoice(order, user_name, user_email)
     return HTMLResponse(content=html)
+
+
+@router.get(
+    "/{order_id}/pdf",
+    summary="Download order invoice as a real PDF document",
+)
+async def get_order_invoice_pdf(
+    order_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from fastapi.responses import StreamingResponse
+    from app.services.pdf_report_service import PdfReportService
+    from app.repositories.order_repository import OrderRepository
+    
+    order_repo = OrderRepository(db)
+    order = await order_repo.get_by_id(order_id)
+    
+    if not order or (order.user_id != current_user.id and current_user.role not in ["admin", "superadmin"]):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
+
+    user_name = current_user.full_name or "Customer"
+    user_email = current_user.email or ""
+
+    pdf_buffer = PdfReportService.generate_invoice_pdf(order, user_name, user_email)
+    filename = f"Invoice-{order.id}.pdf"
+    
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 
 @router.post(

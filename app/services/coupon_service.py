@@ -99,7 +99,14 @@ class CouponService:
             )
             result.append(resp)
 
-        return result
+        seen_codes = set()
+        deduped = []
+        for r in result:
+            code_key = r.code.upper()
+            if code_key not in seen_codes:
+                seen_codes.add(code_key)
+                deduped.append(r)
+        return deduped
 
     async def validate_and_calculate_discount(self, user_id: str, code: str) -> CouponValidationResponse:
         coupon = await self.coupon_repo.get_by_code(code)

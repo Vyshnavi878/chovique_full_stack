@@ -9,6 +9,7 @@ from app.schemas.user import (
     AvatarUploadResponse,
     CustomerAddressCreate,
     CustomerAddressResponse,
+    CustomerAddressUpdate,
     ProfileUpdatePayload,
     SupportNotificationResponse,
     UserResponse,
@@ -57,6 +58,16 @@ async def upload_avatar(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    allowed_mimes = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
+    filename = avatar.filename or ""
+    ext = filename.split(".")[-1].lower() if "." in filename else ""
+    
+    if (avatar.content_type and avatar.content_type.lower() not in allowed_mimes) and ext not in ["jpg", "jpeg", "png", "webp"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid image format. Only JPG, JPEG, PNG, and WebP formats are allowed.",
+        )
+
     service = CustomerService(db)
     return await service.upload_avatar(current_user.id, avatar)
 
@@ -91,6 +102,24 @@ async def add_address(
 ):
     service = CustomerService(db)
     return await service.add_address(current_user.id, payload)
+
+
+@router.put(
+    "/addresses/{address_id}",
+    response_model=CustomerAddressResponse,
+    summary="Update a saved address",
+)
+async def update_address(
+    address_id: str,
+    payload: CustomerAddressUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = CustomerService(db)
+    updated = await service.update_address(current_user.id, address_id, payload)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Address not found.")
+    return updated
 
 
 @router.delete(
