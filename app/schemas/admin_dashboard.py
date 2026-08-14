@@ -25,11 +25,11 @@ class DateFilterQuery(BaseModel):
 # ==========================================================
 
 class DashboardSummaryResponse(BaseModel):
-    total_revenue: float
+    total_revenue: Optional[float] = None
     total_orders: int
     total_customers: int
     reward_coins_issued: int
-    revenue_change_percent: float = 12.5
+    revenue_change_percent: Optional[float] = None
     orders_change_percent: float = 8.2
     customers_change_percent: float = 6.7
     coins_change_percent: float = 13.3

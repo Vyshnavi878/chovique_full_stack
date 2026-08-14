@@ -74,26 +74,7 @@ class AdminDashboardService:
     ) -> DashboardSummaryResponse:
         start_dt, end_dt = resolve_date_range(preset, start_date, end_date)
 
-        # 1. Total revenue (online + offline) using SQL sum
-        online_res = await self.db.execute(
-            select(func.coalesce(func.sum(Order.total), 0.0)).where(
-                Order.status.in_(VALID_PAID_STATUSES),
-                Order.created_at >= start_dt,
-                Order.created_at <= end_dt,
-            )
-        )
-        online_revenue = float(online_res.scalar() or 0.0)
-
-        offline_res = await self.db.execute(
-            select(func.coalesce(func.sum(OfflineSale.total_price), 0.0)).where(
-                OfflineSale.created_at >= start_dt,
-                OfflineSale.created_at <= end_dt,
-            )
-        )
-        offline_revenue = float(offline_res.scalar() or 0.0)
-        total_revenue = round(online_revenue + offline_revenue, 2)
-
-        # 2. Total orders in date range using SQL count
+        # 1. Total orders in date range using SQL count
         orders_res = await self.db.execute(
             select(func.count(Order.id)).where(
                 Order.status.in_(VALID_PAID_STATUSES),
@@ -103,13 +84,13 @@ class AdminDashboardService:
         )
         total_orders = int(orders_res.scalar() or 0)
 
-        # 3. Total registered customers using SQL count
+        # 2. Total registered customers using SQL count
         cust_res = await self.db.execute(
             select(func.count(User.id)).where(User.role == "customer")
         )
         total_customers = int(cust_res.scalar() or 0)
 
-        # 4. Total reward coins issued using SQL sum
+        # 3. Total reward coins issued using SQL sum
         coins_res = await self.db.execute(
             select(func.coalesce(func.sum(CoinTransaction.coins), 0)).where(
                 CoinTransaction.type.in_(["EARN", "ADJUSTMENT"])
@@ -118,55 +99,12 @@ class AdminDashboardService:
         reward_coins_issued = int(coins_res.scalar() or 0)
 
         return DashboardSummaryResponse(
-            total_revenue=total_revenue,
             total_orders=total_orders,
             total_customers=total_customers,
             reward_coins_issued=reward_coins_issued,
-            revenue_change_percent=12.5,
             orders_change_percent=8.2,
             customers_change_percent=6.7,
             coins_change_percent=13.3,
-        )
-
-    async def get_revenue_stats(
-        self,
-        preset: Optional[str] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
-    ) -> RevenueStatsResponse:
-        start_dt, end_dt = resolve_date_range(preset, start_date, end_date)
-
-        online_res = await self.db.execute(
-            select(func.coalesce(func.sum(Order.total), 0.0)).where(
-                Order.status.in_(VALID_PAID_STATUSES),
-                Order.created_at >= start_dt,
-                Order.created_at <= end_dt,
-            )
-        )
-        online_rev = float(online_res.scalar() or 0.0)
-
-        offline_res = await self.db.execute(
-            select(func.coalesce(func.sum(OfflineSale.total_price), 0.0)).where(
-                OfflineSale.created_at >= start_dt,
-                OfflineSale.created_at <= end_dt,
-            )
-        )
-        offline_rev = float(offline_res.scalar() or 0.0)
-
-        aov_res = await self.db.execute(
-            select(func.coalesce(func.avg(Order.total), 0.0)).where(
-                Order.status.in_(VALID_PAID_STATUSES),
-                Order.created_at >= start_dt,
-                Order.created_at <= end_dt,
-            )
-        )
-        aov = float(aov_res.scalar() or 0.0)
-
-        return RevenueStatsResponse(
-            total_revenue=round(online_rev + offline_rev, 2),
-            online_revenue=round(online_rev, 2),
-            offline_revenue=round(offline_rev, 2),
-            average_order_value=round(aov, 2),
         )
 
     async def get_order_stats(

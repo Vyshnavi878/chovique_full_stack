@@ -13,7 +13,6 @@ from app.schemas.admin_dashboard import (
     LowStockProductsResponse,
     OrderStatsResponse,
     RecentOrdersResponse,
-    RevenueStatsResponse,
     RewardCoinStatsResponse,
     SalesChartResponse,
     TopSellingProductsResponse,
@@ -48,23 +47,6 @@ async def get_dashboard_summary(
     validate_date_range(start_date, end_date)
     service = AdminDashboardService(db)
     return await service.get_dashboard_summary(preset=preset, start_date=start_date, end_date=end_date)
-
-
-@router.get(
-    "/revenue",
-    response_model=RevenueStatsResponse,
-    summary="Get aggregated revenue statistics",
-)
-async def get_revenue_stats(
-    preset: Optional[str] = Query(None, description="Preset filter: today, 7days, 30days, month, custom"),
-    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
-    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
-    current_user: User = Depends(require_role("admin", "superadmin")),
-    db: AsyncSession = Depends(get_db),
-):
-    validate_date_range(start_date, end_date)
-    service = AdminDashboardService(db)
-    return await service.get_revenue_stats(preset=preset, start_date=start_date, end_date=end_date)
 
 
 @router.get(
