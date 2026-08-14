@@ -1,11 +1,11 @@
 from datetime import datetime
 from typing import Optional, Tuple, List
-from sqlalchemy import select, func, or_, and_
+from sqlalchemy import select, func, or_, and_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.admin_activity_log import AdminActivityLog
 from app.models.user import User
+from app.models.audit_log import AuditLog
 from app.schemas.admin_activity_log import ActivityLogResponse, ActivityLogListResponse
 
 
@@ -18,22 +18,26 @@ async def log_admin_activity(
     ip_address: Optional[str] = None,
     user_agent: Optional[str] = None,
     status: str = "SUCCESS",
-):
-    """Helper to log admin activity in the database."""
+) -> None:
+    """Log an immutable admin activity entry into the audit_log table."""
     try:
-        log_entry = AdminActivityLog(
-            admin_id=admin_id,
+        log_entry = AuditLog(
+            user_id=admin_id,
+            user_role="admin",
             action=action.upper().strip(),
             module=module.lower().strip(),
-            description=description,
-            ip_address=ip_address,
-            user_agent=user_agent,
+            endpoint=module.lower().strip(),
             status=status.upper().strip(),
+            ip_address=ip_address or "127.0.0.1",
+            user_agent=user_agent or "System",
+            details=description,
         )
         db.add(log_entry)
-        await db.flush()
+        await db.commit()
     except Exception as e:
-        print(f"Failed to create admin activity log: {e}")
+        await db.rollback()
+        import logging
+        logging.getLogger(__name__).error("Failed to write activity log: %s", e)
 
 
 class ActivityLogService:
@@ -52,46 +56,76 @@ class ActivityLogService:
         status: Optional[str] = None,
         search: Optional[str] = None,
     ) -> ActivityLogListResponse:
-        query = select(AdminActivityLog).options(selectinload(AdminActivityLog.admin))
-        conditions = []
+        query = select(AuditLog).outerjoin(User, AuditLog.user_id == User.id).options(selectinload(AuditLog.user))
+        conditions = [
+            and_(
+                or_(func.lower(cast(AuditLog.user_role, String)) != "superadmin", AuditLog.user_role == None),
+                or_(func.lower(cast(User.role, String)) != "superadmin", User.role == None),
+            )
+        ]
 
         # Module filter
         if module and module.strip() and module.lower() != "all":
-            conditions.append(func.lower(AdminActivityLog.module) == module.lower().strip())
+            conditions.append(func.lower(cast(AuditLog.module, String)) == module.lower().strip())
 
         # Action filter
         if action and action.strip() and action.lower() != "all":
-            conditions.append(func.lower(AdminActivityLog.action) == action.lower().strip())
+            act_val = action.strip().lower()
+            aliases = [act_val]
+            if act_val in ["updated_profile", "update_admin_profile"]:
+                aliases.extend(["updated_profile", "update_admin_profile"])
+            elif act_val in ["changed_password", "change_admin_password"]:
+                aliases.extend(["changed_password", "change_admin_password"])
+            elif act_val in ["logged_in", "login"]:
+                aliases.extend(["logged_in", "login"])
+            elif act_val in ["logged_out", "logout"]:
+                aliases.extend(["logged_out", "logout"])
+
+            conditions.append(
+                or_(
+                    func.lower(cast(AuditLog.action, String)).in_(aliases),
+                    cast(AuditLog.action, String).ilike(f"%{act_val}%"),
+                )
+            )
 
         # Status filter
         if status and status.strip() and status.lower() != "all":
-            conditions.append(func.lower(AdminActivityLog.status) == status.lower().strip())
+            conditions.append(func.lower(cast(AuditLog.status, String)) == status.lower().strip())
 
-        # Date range filter
-        if start_date:
+        if start_date and start_date.strip():
             try:
-                dt_start = datetime.fromisoformat(start_date)
-                conditions.append(AdminActivityLog.created_at >= dt_start)
-            except ValueError:
+                raw_start = start_date.strip()
+                if len(raw_start) == 10:
+                    dt_start = datetime.strptime(raw_start, "%Y-%m-%d")
+                else:
+                    dt_start = datetime.fromisoformat(raw_start)
+                conditions.append(AuditLog.created_at >= dt_start)
+            except Exception:
                 pass
 
-        if end_date:
+        if end_date and end_date.strip():
             try:
-                dt_end = datetime.fromisoformat(end_date)
-                conditions.append(AdminActivityLog.created_at <= dt_end)
-            except ValueError:
+                raw_end = end_date.strip()
+                if len(raw_end) == 10:
+                    dt_end = datetime.strptime(raw_end, "%Y-%m-%d").replace(
+                        hour=23, minute=59, second=59, microsecond=999999
+                    )
+                else:
+                    dt_end = datetime.fromisoformat(raw_end)
+                    if dt_end.hour == 0 and dt_end.minute == 0 and dt_end.second == 0:
+                        dt_end = dt_end.replace(hour=23, minute=59, second=59, microsecond=999999)
+                conditions.append(AuditLog.created_at <= dt_end)
+            except Exception:
                 pass
 
-        # Search filter (description, admin name, admin email)
+        # Search filter (details, action, module, admin name, admin email)
         if search and search.strip():
             s_pattern = f"%{search.strip()}%"
-            # Join with user table if needed for search
-            query = query.outerjoin(User, AdminActivityLog.admin_id == User.id)
             conditions.append(
                 or_(
-                    AdminActivityLog.description.ilike(s_pattern),
-                    AdminActivityLog.action.ilike(s_pattern),
-                    AdminActivityLog.module.ilike(s_pattern),
+                    AuditLog.action.ilike(s_pattern),
+                    AuditLog.module.ilike(s_pattern),
+                    AuditLog.endpoint.ilike(s_pattern),
                     User.full_name.ilike(s_pattern),
                     User.email.ilike(s_pattern),
                 )
@@ -107,22 +141,25 @@ class ActivityLogService:
 
         # Pagination & Ordering
         offset = (page - 1) * limit
-        query = query.order_by(AdminActivityLog.created_at.desc()).offset(offset).limit(limit)
+        query = query.order_by(AuditLog.created_at.desc()).offset(offset).limit(limit)
 
         result = await self.db.execute(query)
         logs = result.scalars().all()
 
         items: List[ActivityLogResponse] = []
         for log in logs:
+            desc = log.details or f"{log.action} in {log.module}"
+            r_val = log.user_role or (log.user.role if log.user else "admin")
             items.append(
                 ActivityLogResponse(
                     id=log.id,
-                    admin_id=log.admin_id,
-                    admin_name=log.admin.full_name if log.admin else "System Admin",
-                    admin_email=log.admin.email if log.admin else None,
+                    admin_id=log.user_id,
+                    admin_name=log.user.full_name if log.user else "System Admin",
+                    admin_email=log.user.email if log.user else None,
+                    user_role=r_val,
                     action=log.action,
                     module=log.module,
-                    description=log.description,
+                    description=desc,
                     ip_address=log.ip_address,
                     user_agent=log.user_agent,
                     status=log.status,
@@ -136,3 +173,4 @@ class ActivityLogService:
             page=page,
             limit=limit,
         )
+

@@ -1,5 +1,4 @@
 from app.models.address import CustomerAddress
-from app.models.admin_activity_log import AdminActivityLog
 from app.models.audit_log import AuditLog
 from app.models.banner import Banner
 from app.models.cart import Cart, CartItem

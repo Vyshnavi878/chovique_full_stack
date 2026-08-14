@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import uuid
 from sqlalchemy import Column, DateTime, ForeignKey, String, Text, JSON
 from sqlalchemy.orm import relationship
@@ -24,6 +25,44 @@ class AuditLog(Base):
     # Mapped as log_metadata to avoid collision with Base.metadata
     log_metadata = Column("metadata", JSON, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
+        index=True,
+    )
 
     user = relationship("User", foreign_keys=[user_id])
+
+    def __init__(self, **kwargs):
+        resource = kwargs.pop("resource", None)
+        details = kwargs.pop("details", None)
+        super().__init__(**kwargs)
+        if resource is not None:
+            self.endpoint = resource
+        if details is not None:
+            if self.log_metadata is None or not isinstance(self.log_metadata, dict):
+                self.log_metadata = {}
+            self.log_metadata["details"] = details
+
+    @property
+    def resource(self) -> str | None:
+        return self.endpoint or self.module
+
+    @resource.setter
+    def resource(self, value: str | None) -> None:
+        self.endpoint = value
+
+    @property
+    def details(self) -> str | None:
+        if self.log_metadata and isinstance(self.log_metadata, dict):
+            return self.log_metadata.get("details") or self.log_metadata.get("description")
+        return None
+
+    @details.setter
+    def details(self, value: str | None) -> None:
+        if self.log_metadata is None or not isinstance(self.log_metadata, dict):
+            self.log_metadata = {}
+        self.log_metadata["details"] = value
+

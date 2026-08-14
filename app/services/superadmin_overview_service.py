@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import func, select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.admin_activity_log import AdminActivityLog
+from app.models.audit_log import AuditLog
 from app.models.offline_sale import OfflineSale
 from app.models.order import Order, OrderItem
 from app.models.product import Product
@@ -337,9 +337,9 @@ class SuperadminOverviewService:
         # 8. Recent Activity Logs
         # -----------------------------------------------------
         activities_q = (
-            select(AdminActivityLog, User.full_name)
-            .outerjoin(User, User.id == AdminActivityLog.admin_id)
-            .order_by(desc(AdminActivityLog.created_at))
+            select(AuditLog, User.full_name)
+            .outerjoin(User, User.id == AuditLog.user_id)
+            .order_by(desc(AuditLog.created_at))
             .limit(6)
         )
         act_res = await self.db.execute(activities_q)
@@ -348,11 +348,12 @@ class SuperadminOverviewService:
         recent_activities = []
         for log_entry, user_name in act_rows:
             ts_str = log_entry.created_at.strftime("%d %b %Y, %I:%M %p") if log_entry.created_at else ""
+            desc_val = log_entry.details or (f"{log_entry.action} in {log_entry.module}" if log_entry.module else log_entry.action)
             recent_activities.append(
                 RecentActivityItem(
                     id=log_entry.id,
                     action=log_entry.action,
-                    description=log_entry.description,
+                    description=desc_val,
                     timestamp=ts_str,
                     user_name=user_name or "System",
                 )

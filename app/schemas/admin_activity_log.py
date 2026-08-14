@@ -8,6 +8,7 @@ class ActivityLogResponse(BaseModel):
     admin_id: Optional[str] = None
     admin_name: Optional[str] = "System Admin"
     admin_email: Optional[str] = None
+    user_role: Optional[str] = "Admin"
     action: str
     module: str
     description: str

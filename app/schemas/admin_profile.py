@@ -24,9 +24,8 @@ class AdminProfileUpdateRequest(BaseModel):
         v = v.strip()
         if not v:
             raise ValueError("Phone number is required.")
-        digits = re.sub(r"\D", "", v)
-        if len(digits) < 7 or len(digits) > 15:
-            raise ValueError("Please enter a valid phone number (7-15 digits).")
+        if not re.match(r"^[6-9][0-9]{9}$", v):
+            raise ValueError("Enter a valid 10-digit mobile number starting with 6, 7, 8, or 9.")
         return v
 
     @field_validator("address")

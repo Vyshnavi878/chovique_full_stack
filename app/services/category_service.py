@@ -32,9 +32,7 @@ class CategoryService:
         res = []
         for c in categories:
             count_res = await self.db.execute(
-                select(func.count(Product.id)).where(
-                    Product.category.ilike(f"%{c.slug}%") | Product.category.ilike(f"%{c.name.split()[0]}%")
-                )
+                select(func.count(Product.id)).where(Product.category_id == c.id)
             )
             p_count = int(count_res.scalar() or 0)
             data = CategoryResponse.model_validate(c)
@@ -62,7 +60,7 @@ class CategoryService:
     ) -> PaginatedProductResponse:
 
         category = await self.category_repo.get_by_slug(slug)
-        category_filter = category.slug if category else slug
+        category_filter = category.id if category else slug
 
         result = await self.product_repo.get_all(
             category=category_filter,
@@ -99,4 +97,11 @@ class CategoryService:
         return CategoryResponse.model_validate(category)
 
     async def delete_category(self, category_id: str) -> bool:
+        from sqlalchemy import select, func
+        from app.models.product import Product
+        count_res = await self.db.execute(
+            select(func.count(Product.id)).where(Product.category_id == category_id)
+        )
+        if (count_res.scalar() or 0) > 0:
+            raise ValueError("Cannot delete category: products are currently assigned to this category.")
         return await self.category_repo.delete(category_id)

@@ -51,8 +51,8 @@ class CartService:
 
     async def add_to_cart(self, user_id: str, product_id: str, quantity: int = 1) -> CartResponseSchema:
         product = await self.product_repo.get_by_id(product_id)
-        if not product or not product.is_active:
-            raise ValueError("Product is not available.")
+        if not product or not product.is_active or getattr(product, "is_available", True) is False or product.stock <= 0:
+            raise ValueError("Product is out of stock.")
 
         if product.stock < quantity:
             raise ValueError(f"Insufficient stock available. Only {product.stock} items left.")

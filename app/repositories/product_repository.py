@@ -41,16 +41,19 @@ class ProductRepository:
                     Product.description.ilike(term),
                     Product.ingredients.ilike(term),
                     Product.badge.ilike(term),
-                    cast(Product.category, String).ilike(term),
                 )
             )
 
         if category and category != "all":
-            valid_enums = ["dark", "milk", "white", "gift", "beverage"]
-            if category in valid_enums:
-                query = query.where(Product.category == category)
-            else:
-                query = query.where(cast(Product.category, String).ilike(f"%{category}%"))
+            from app.models.category import Category
+            query = query.join(Product.category_rel, isouter=True).where(
+                or_(
+                    Product.category_id == category,
+                    Category.id == category,
+                    Category.slug == category,
+                    Category.name.ilike(f"%{category}%")
+                )
+            )
 
         if price_min is not None:
             query = query.where(Product.price >= price_min)
@@ -217,13 +220,62 @@ class ProductRepository:
 
         return list(result.scalars().all())
 
+    async def _resolve_category_id(self, category_id: str | None, legacy_cat: str | None) -> str | None:
+        from app.models.category import Category
+        val = category_id or legacy_cat
+        if not val:
+            return None
+
+        # 1. Direct ID match
+        res_id = await self.db.execute(select(Category.id).where(Category.id == val))
+        matched_id = res_id.scalar_one_or_none()
+        if matched_id:
+            return matched_id
+
+        # 2. Exact match on slug or name
+        clean_val = val.strip()
+        res_exact = await self.db.execute(
+            select(Category.id).where(
+                or_(
+                    Category.slug == clean_val.lower(),
+                    Category.name.ilike(clean_val)
+                )
+            ).order_by(Category.sort_order.asc())
+        )
+        matched_exact = res_exact.scalars().first()
+        if matched_exact:
+            return matched_exact
+
+        # 3. Partial match on slug or name
+        res_partial = await self.db.execute(
+            select(Category.id).where(
+                or_(
+                    Category.slug.ilike(f"%{clean_val}%"),
+                    Category.name.ilike(f"%{clean_val}%")
+                )
+            ).order_by(Category.sort_order.asc())
+        )
+        matched_partial = res_partial.scalars().first()
+        if matched_partial:
+            return matched_partial
+
+        # 4. Fallback: Return first active category ID in database
+        res_first = await self.db.execute(
+            select(Category.id).where(Category.is_active.is_(True)).order_by(Category.sort_order.asc())
+        )
+        return res_first.scalars().first()
+
     # ==========================================================
     # Create
     # ==========================================================
 
     async def create(self, **kwargs) -> Product:
+        category_id = kwargs.pop("category_id", None)
+        legacy_cat = kwargs.pop("category", None)
 
-        product = Product(**kwargs)
+        resolved_cat_id = await self._resolve_category_id(category_id, legacy_cat)
+
+        product = Product(category_id=resolved_cat_id, **kwargs)
         self.db.add(product)
         await self.db.commit()
         await self.db.refresh(product)
@@ -239,6 +291,13 @@ class ProductRepository:
         commit: bool = True,
         **kwargs,
     ) -> Product | None:
+        category_id = kwargs.pop("category_id", None)
+        legacy_cat = kwargs.pop("category", None)
+
+        if category_id is not None or legacy_cat is not None:
+            resolved_cat_id = await self._resolve_category_id(category_id, legacy_cat)
+            if resolved_cat_id:
+                kwargs["category_id"] = resolved_cat_id
 
         if kwargs:
             await self.db.execute(

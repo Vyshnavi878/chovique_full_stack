@@ -111,6 +111,7 @@ class ProductService:
             name=data.name,
             sku=sku,
             slug=slug,
+            category_id=data.category_id,
             category=data.category,
             price=data.price,
             original_price=data.original_price,

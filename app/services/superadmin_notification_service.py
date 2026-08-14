@@ -265,9 +265,9 @@ class SuperadminNotificationService:
         from fastapi import HTTPException, status
 
         result = await self.db.execute(
-            select(SuperadminNotification).where(
-                SuperadminNotification.id == notification_id
-            )
+            select(SuperadminNotification)
+            .options(selectinload(SuperadminNotification.related_user))
+            .where(SuperadminNotification.id == notification_id)
         )
         notif = result.scalar_one_or_none()
         if not notif:
@@ -279,7 +279,14 @@ class SuperadminNotificationService:
             notif.is_read = True
             notif.read_at = datetime.now(timezone.utc)
             await self.db.commit()
-            await self.db.refresh(notif)
+            
+            result = await self.db.execute(
+                select(SuperadminNotification)
+                .options(selectinload(SuperadminNotification.related_user))
+                .where(SuperadminNotification.id == notification_id)
+            )
+            notif = result.scalar_one()
+
         return SuperadminNotificationResponse.model_validate(notif)
 
     # ── Mark all as read ──────────────────────────────────────────────────

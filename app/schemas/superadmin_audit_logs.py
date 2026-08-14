@@ -14,9 +14,10 @@ class AuditLogResponse(BaseModel):
     module: str
     entity_type: Optional[str] = None
     entity_id: Optional[str] = None
+    description: Optional[str] = None
     ip_address: Optional[str] = "127.0.0.1"
     user_agent: Optional[str] = None
-    request_method: Optional[str] = "GET"
+    request_method: Optional[str] = None
     endpoint: Optional[str] = None
     status: str = "SUCCESS"
     metadata: Optional[Dict[str, Any]] = None

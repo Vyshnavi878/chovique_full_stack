@@ -9,34 +9,14 @@ logger = logging.getLogger(__name__)
 
 class AuditLogMiddleware(BaseHTTPMiddleware):
     """
-    Middleware that records sensitive admin API operations into audit_logs table.
+    Middleware for request pipeline processing.
+    Automatic raw HTTP request logging is disabled to ensure audit_logs contains only
+    explicit, meaningful business and security events.
     """
 
     async def dispatch(self, request: Request, call_next):
-        # Always pass OPTIONS preflight requests straight through so that
-        # CORSMiddleware (which is the outer layer) can respond with the
-        # correct Access-Control-Allow-Origin headers unobstructed.
-        if request.method == "OPTIONS":
-            return await call_next(request)
+        # Always pass OPTIONS preflight and standard requests straight through.
+        # Explicit business actions (e.g. coupon creation, profile update, settings changes)
+        # record detailed audit log entries directly in their service handlers.
+        return await call_next(request)
 
-        response = await call_next(request)
-
-        # Record admin & write operations
-        path = request.url.path
-        method = request.method
-
-        if (path.startswith("/api/v1/admin") or method in ("POST", "PUT", "PATCH", "DELETE")) and not path.endswith("/health"):
-            if 200 <= response.status_code < 300:
-                client_ip = request.client.host if request.client else "unknown"
-                try:
-                    async with AsyncSessionLocal() as session:
-                        audit_repo = AuditLogRepository(session)
-                        await audit_repo.log(
-                            action=f"{method} {path}",
-                            ip_address=client_ip,
-                            resource=path,
-                        )
-                except Exception as e:
-                    logger.debug("Failed to record audit log: %s", e)
-
-        return response

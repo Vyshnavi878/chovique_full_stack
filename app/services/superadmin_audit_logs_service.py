@@ -1,6 +1,6 @@
 import io
 import csv
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 from sqlalchemy import select, func, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,9 +8,10 @@ from sqlalchemy.orm import selectinload
 from fastapi import HTTPException, status
 
 from app.models.audit_log import AuditLog
-from app.models.admin_activity_log import AdminActivityLog
 from app.models.user import User
 from app.schemas.superadmin_audit_logs import AuditLogResponse, AuditLogListResponse
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 
 async def record_audit_event(
@@ -45,22 +46,6 @@ async def record_audit_event(
             log_metadata=metadata or {},
         )
         db.add(log_entry)
-
-        # Also create AdminActivityLog record for backward compatibility
-        desc = f"{action} in {module}"
-        if entity_type and entity_id:
-            desc += f" ({entity_type}: {entity_id})"
-        admin_log = AdminActivityLog(
-            admin_id=user_id,
-            action=action.upper().strip(),
-            module=module.lower().strip(),
-            description=desc,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            status=status_str.upper().strip(),
-        )
-        db.add(admin_log)
-
         await db.flush()
     except Exception as e:
         print(f"Failed to record audit log: {e}")
@@ -80,7 +65,14 @@ class SuperadminAuditLogsService:
             u_email = log.user.email
             u_role = log.user.role
 
-        formatted_dt = log.created_at.strftime("%d %b %Y, %I:%M %p") if log.created_at else ""
+        formatted_dt = ""
+        if log.created_at:
+            dt = log.created_at
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            formatted_dt = dt.astimezone(IST).strftime("%d %b %Y, %I:%M %p")
+
+        desc_val = log.details or (f"{log.action} in {log.module}" if log.module else log.action)
 
         return AuditLogResponse(
             id=log.id,
@@ -92,10 +84,11 @@ class SuperadminAuditLogsService:
             module=log.module,
             entity_type=log.entity_type,
             entity_id=log.entity_id,
-            ip_address=log.ip_address or "192.168.1.10",
+            description=desc_val,
+            ip_address=log.ip_address or "127.0.0.1",
             user_agent=log.user_agent,
-            request_method=log.request_method or "POST",
-            endpoint=log.endpoint or f"/api/v1/{log.module}",
+            request_method=log.request_method,
+            endpoint=log.endpoint,
             status=log.status or "SUCCESS",
             metadata=log.log_metadata or {},
             created_at=formatted_dt,
@@ -116,30 +109,58 @@ class SuperadminAuditLogsService:
         """Fetch paginated audit logs with search and multi-filtering."""
         stmt = select(AuditLog).options(selectinload(AuditLog.user))
 
-        if user_id and user_id.strip() and user_id.lower() != "all":
+        if user_id and user_id.strip() and user_id.strip().lower() not in ("all", "all users"):
             stmt = stmt.where(AuditLog.user_id == user_id.strip())
 
-        if action and action.strip() and action.lower() != "all":
-            stmt = stmt.where(func.lower(AuditLog.action) == action.lower().strip())
+        if action and action.strip() and action.strip().lower() not in ("all", "all actions"):
+            act_clean = action.strip().lower()
+            act_alt = act_clean.replace(" ", "_")
+            act_alt2 = act_clean.replace("_", " ")
+            stmt = stmt.where(
+                or_(
+                    func.lower(AuditLog.action) == act_clean,
+                    func.lower(AuditLog.action) == act_alt,
+                    func.lower(AuditLog.action) == act_alt2,
+                    AuditLog.action.ilike(f"%{act_clean}%"),
+                )
+            )
 
-        if module and module.strip() and module.lower() != "all":
-            stmt = stmt.where(func.lower(AuditLog.module) == module.lower().strip())
+        if module and module.strip() and module.strip().lower() not in ("all", "all modules"):
+            mod_clean = module.strip().lower()
+            stmt = stmt.where(
+                or_(
+                    func.lower(AuditLog.module) == mod_clean,
+                    AuditLog.module.ilike(f"%{mod_clean}%"),
+                )
+            )
 
-        if status_filter and status_filter.strip() and status_filter.lower() != "all":
-            stmt = stmt.where(func.lower(AuditLog.status) == status_filter.lower().strip())
+        if status_filter and status_filter.strip() and status_filter.strip().lower() not in ("all", "all status"):
+            stmt = stmt.where(func.lower(AuditLog.status) == status_filter.strip().lower())
 
-        if date_from:
+        if date_from and date_from.strip():
             try:
-                dt_from = datetime.fromisoformat(date_from)
+                raw_from = date_from.strip()
+                if len(raw_from) == 10:
+                    dt_from = datetime.strptime(raw_from, "%Y-%m-%d")
+                else:
+                    dt_from = datetime.fromisoformat(raw_from)
                 stmt = stmt.where(AuditLog.created_at >= dt_from)
-            except ValueError:
+            except Exception:
                 pass
 
-        if date_to:
+        if date_to and date_to.strip():
             try:
-                dt_to = datetime.fromisoformat(date_to)
+                raw_to = date_to.strip()
+                if len(raw_to) == 10:
+                    dt_to = datetime.strptime(raw_to, "%Y-%m-%d").replace(
+                        hour=23, minute=59, second=59, microsecond=999999
+                    )
+                else:
+                    dt_to = datetime.fromisoformat(raw_to)
+                    if dt_to.hour == 0 and dt_to.minute == 0 and dt_to.second == 0:
+                        dt_to = dt_to.replace(hour=23, minute=59, second=59, microsecond=999999)
                 stmt = stmt.where(AuditLog.created_at <= dt_to)
-            except ValueError:
+            except Exception:
                 pass
 
         if search and search.strip():

@@ -169,7 +169,8 @@ async def get_related_products(
 )
 async def create_product(
     name: str = Form(...),
-    category: str = Form(...),
+    category_id: Optional[str] = Form(default=None),
+    category: Optional[str] = Form(default=None),
     price: float = Form(...),
     description: Optional[str] = Form(default=None),
     is_featured: Optional[bool] = Form(default=False),
@@ -200,23 +201,7 @@ async def create_product(
     current_user: User = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
-    # Clean category enum mapping
-    cat_raw = (category or "dark").lower().strip()
-    valid_categories = ["dark", "milk", "white", "gift", "beverage"]
-    if cat_raw in valid_categories:
-        clean_cat = cat_raw
-    elif "milk" in cat_raw:
-        clean_cat = "milk"
-    elif "white" in cat_raw:
-        clean_cat = "white"
-    elif "gift" in cat_raw or "hamper" in cat_raw or "box" in cat_raw:
-        clean_cat = "gift"
-    elif "bev" in cat_raw:
-        clean_cat = "beverage"
-    elif "dark" in cat_raw:
-        clean_cat = "dark"
-    else:
-        clean_cat = "dark"
+    selected_category = category_id or category
 
     # Set badge if flags provided, and sync boolean flags with badge
     clean_badge = badge
@@ -292,7 +277,8 @@ async def create_product(
 
     data = ProductCreate(
         name=name,
-        category=clean_cat,
+        category_id=selected_category,
+        category=selected_category,
         price=price,
         original_price=original_price,
         weight=weight,
@@ -328,24 +314,6 @@ async def update_product(
     current_user: User = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
-    if data.category:
-        cat_raw = data.category.lower().strip()
-        valid_categories = ["dark", "milk", "white", "gift", "beverage"]
-        if cat_raw in valid_categories:
-            data.category = cat_raw
-        elif "milk" in cat_raw:
-            data.category = "milk"
-        elif "white" in cat_raw:
-            data.category = "white"
-        elif "gift" in cat_raw or "hamper" in cat_raw or "box" in cat_raw:
-            data.category = "gift"
-        elif "bev" in cat_raw:
-            data.category = "beverage"
-        elif "dark" in cat_raw:
-            data.category = "dark"
-        else:
-            data.category = "dark"
-
     service = ProductService(db)
     product = await service.update_product(product_id, data)
 

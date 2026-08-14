@@ -15,13 +15,30 @@ class AuditLogRepository:
         ip_address: str | None = None,
         resource: str | None = None,
         details: str | None = None,
+        module: str = "system",
+        user_role: str | None = None,
+        entity_type: str | None = None,
+        entity_id: str | None = None,
+        request_method: str | None = None,
+        status: str = "SUCCESS",
+        metadata: dict | None = None,
     ) -> AuditLog:
+        log_meta = dict(metadata) if metadata else {}
+        if details:
+            log_meta["details"] = details
+
         entry = AuditLog(
             user_id=user_id,
+            user_role=user_role,
             action=action,
+            module=module,
+            entity_type=entity_type,
+            entity_id=entity_id,
             ip_address=ip_address,
-            resource=resource,
-            details=details,
+            request_method=request_method,
+            endpoint=resource,
+            status=status,
+            log_metadata=log_meta if log_meta else None,
         )
         self.db.add(entry)
         await self.db.commit()

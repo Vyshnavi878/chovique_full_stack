@@ -45,11 +45,12 @@ class ProductResponse(BaseModel):
     sku: Optional[str] = None
     name: str
     slug: str
+    category_id: Optional[str] = None
     category: str
     price: float
     originalPrice: Optional[float] = None
     weight: Optional[str] = None
-    stock: int = 100
+    stock: int = 0
     description: Optional[str] = None
     ingredients: Optional[str] = None
     nutrition: Optional[NutritionInfo] = None
@@ -58,6 +59,7 @@ class ProductResponse(BaseModel):
     hoverImage: Optional[str] = None
     rating: float = 0.0
     ratingsCount: int = 0
+    isAvailable: bool = True
     isFeatured: bool = False
     isBestseller: bool = False
     isNewArrival: bool = False
@@ -88,24 +90,35 @@ class ProductResponse(BaseModel):
                 for r in product.__dict__["reviews_list"]
             ]
 
+        raw_stock = getattr(product, "stock", 0)
+        stock_val = raw_stock if raw_stock is not None else 0
+
+        raw_rating = getattr(product, "rating", 0.0)
+        rating_val = float(raw_rating) if raw_rating is not None else 0.0
+
+        cat_id = getattr(product, "category_id", None)
+        cat_name = getattr(product, "category", "") or ""
+
         return cls(
             id=product.id,
             sku=getattr(product, "sku", None),
             name=product.name,
             slug=product.slug,
-            category=product.category,
+            category_id=cat_id,
+            category=cat_name,
             price=product.price,
             originalPrice=product.original_price,
             weight=product.weight,
-            stock=getattr(product, "stock", 100),
+            stock=stock_val,
             description=product.description,
             ingredients=product.ingredients,
             nutrition=nutrition,
             badge=product.badge,
             image=product.image,
             hoverImage=product.hover_image,
-            rating=product.rating,
+            rating=rating_val,
             ratingsCount=product.ratings_count,
+            isAvailable=getattr(product, "is_available", True),
             isFeatured=getattr(product, "is_featured", False),
             isBestseller=getattr(product, "is_bestseller", False),
             isNewArrival=getattr(product, "is_new_arrival", False),
@@ -121,7 +134,8 @@ class ProductResponse(BaseModel):
 class ProductCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     sku: Optional[str] = None
-    category: str
+    category_id: Optional[str] = None
+    category: Optional[str] = None
     price: float = Field(..., gt=0)
     original_price: Optional[float] = None
     weight: Optional[str] = None
@@ -135,6 +149,7 @@ class ProductCreate(BaseModel):
     rating: float = 0.0
     ratings_count: int = 0
     sort_order: int = 0
+    is_available: bool = True
     is_featured: bool = False
     is_bestseller: bool = False
     is_new_arrival: bool = False
@@ -148,6 +163,7 @@ class ProductCreate(BaseModel):
 
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
+    category_id: Optional[str] = None
     category: Optional[str] = None
     price: Optional[float] = None
     original_price: Optional[float] = None
@@ -161,6 +177,7 @@ class ProductUpdate(BaseModel):
     hover_image: Optional[str] = None
     rating: Optional[float] = None
     ratings_count: Optional[int] = None
+    is_available: Optional[bool] = None
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
     is_featured: Optional[bool] = None

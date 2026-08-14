@@ -145,14 +145,15 @@ def require_role(*allowed_roles):
     roles_set = set()
     for role in allowed_roles:
         if isinstance(role, (list, tuple, set)):
-            roles_set.update(role)
+            roles_set.update(str(r).lower().strip() for r in role)
         else:
-            roles_set.add(role)
+            roles_set.add(str(role).lower().strip())
 
     async def _check_role(
         current_user: User = Depends(get_current_user),
     ) -> User:
-        if current_user.role not in roles_set:
+        user_role = (current_user.role or "").lower().strip()
+        if user_role not in roles_set:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You do not have permission to access this resource.",

@@ -16,9 +16,12 @@ VALID_SEVERITIES = {"INFO", "WARNING", "CRITICAL"}
 # Response schemas
 # ──────────────────────────────────────────────────────────────────────────────
 
+from pydantic import BaseModel, Field, AliasChoices
+
+
 class RelatedUserInfo(BaseModel):
     id: str
-    name: str
+    name: str = Field(default="", validation_alias=AliasChoices("name", "full_name"))
     email: str
     role: str
 
