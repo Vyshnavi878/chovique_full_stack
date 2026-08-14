@@ -5,7 +5,7 @@ from app.schemas.user import UserResponse
 
 
 # ==========================================================
-# Register
+# Password Policy Constant
 # ==========================================================
 
 PASSWORD_POLICY_ERROR = (
@@ -14,24 +14,55 @@ PASSWORD_POLICY_ERROR = (
 )
 
 
+def validate_password_strength(v: str) -> str:
+    """Helper to validate password strength across request schemas."""
+    if not v:
+        raise ValueError("Password is required.")
+    if (
+        len(v) < 8
+        or not re.search(r"[A-Z]", v)
+        or not re.search(r"[a-z]", v)
+        or not re.search(r"[0-9]", v)
+        or not re.search(r"[^A-Za-z0-9]", v)
+    ):
+        raise ValueError(PASSWORD_POLICY_ERROR)
+    return v
+
+
+def validate_otp_format(v: str) -> str:
+    """Helper to validate 6-digit numeric OTP format."""
+    v_clean = v.strip() if v else ""
+    if not v_clean:
+        raise ValueError("OTP is required.")
+    if not re.match(r"^\d{6}$", v_clean):
+        raise ValueError("OTP must be a valid 6-digit numeric code.")
+    return v_clean
+
+
+# ==========================================================
+# Register
+# ==========================================================
+
 class RegisterRequest(BaseModel):
     full_name: str = Field(..., min_length=2, max_length=120)
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=128)
     confirm_password: str
 
+    @field_validator("full_name")
+    @classmethod
+    def validate_full_name(cls, v: str) -> str:
+        trimmed = v.strip() if v else ""
+        if not trimmed or len(trimmed) < 2:
+            raise ValueError("Full Name must be at least 2 characters.")
+        if not re.search(r"[a-zA-Z]", trimmed):
+            raise ValueError("Full Name must contain valid letters.")
+        return trimmed
+
     @field_validator("password")
     @classmethod
     def password_strength(cls, v: str) -> str:
-        if (
-            len(v) < 8
-            or not re.search(r"[A-Z]", v)
-            or not re.search(r"[a-z]", v)
-            or not re.search(r"[0-9]", v)
-            or not re.search(r"[^A-Za-z0-9]", v)
-        ):
-            raise ValueError(PASSWORD_POLICY_ERROR)
-        return v
+        return validate_password_strength(v)
 
 
 # ==========================================================
@@ -40,9 +71,19 @@ class RegisterRequest(BaseModel):
 
 class VerifyOTPRequest(BaseModel):
     email: EmailStr
-    otp: str = Field(..., min_length=6, max_length=6)
+    otp: str
     full_name: str = Field(..., min_length=2, max_length=120)
     password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("otp")
+    @classmethod
+    def validate_otp(cls, v: str) -> str:
+        return validate_otp_format(v)
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        return validate_password_strength(v)
 
 
 VerifyRegistrationOTPRequest = VerifyOTPRequest
@@ -56,6 +97,13 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
 
+    @field_validator("password")
+    @classmethod
+    def validate_password_not_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Password is required.")
+        return v
+
 
 # ==========================================================
 # Google Login
@@ -63,6 +111,13 @@ class LoginRequest(BaseModel):
 
 class GoogleLoginRequest(BaseModel):
     id_token: str
+
+    @field_validator("id_token")
+    @classmethod
+    def validate_token(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Google ID Token is required.")
+        return v.strip()
 
 
 # ==========================================================
@@ -72,6 +127,11 @@ class GoogleLoginRequest(BaseModel):
 class SetPasswordRequest(BaseModel):
     password: str = Field(..., min_length=8)
     confirm_password: str
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        return validate_password_strength(v)
 
 
 # ==========================================================
@@ -90,7 +150,6 @@ class ResendOTPRequest(BaseModel):
     email: EmailStr
 
 
-
 # ==========================================================
 # Resend Forgot Password OTP
 # ==========================================================
@@ -105,9 +164,19 @@ class ResendForgotOTPRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     email: EmailStr
-    otp: str = Field(..., min_length=6, max_length=6)
+    otp: str
     password: str = Field(..., min_length=8)
     confirm_password: str
+
+    @field_validator("otp")
+    @classmethod
+    def validate_otp(cls, v: str) -> str:
+        return validate_otp_format(v)
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        return validate_password_strength(v)
 
 
 # ==========================================================
@@ -119,13 +188,22 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8)
     confirm_password: str
 
+    @field_validator("current_password")
+    @classmethod
+    def validate_current(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Current password is required.")
+        return v
+
+    @field_validator("new_password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        return validate_password_strength(v)
+
 
 # ==========================================================
 # Response Wrappers
 # ==========================================================
-# These describe the exact JSON shape the auth endpoints return,
-# so FastAPI validates the response and Swagger shows accurate
-# request/response schemas instead of "any" objects.
 
 class OTPSentResponse(BaseModel):
     """Response for register / resend-otp (no user object yet)."""
@@ -135,7 +213,6 @@ class OTPSentResponse(BaseModel):
 
 
 class AuthUserResponse(BaseModel):
-    """Response for endpoints that return a token pair + user profile
-    (verify-otp, login, google, set-password)."""
+    """Response for endpoints that return a token pair + user profile."""
     message: str
     user: UserResponse
