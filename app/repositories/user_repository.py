@@ -211,11 +211,18 @@ class UserRepository:
     async def list_customers_paginated(
         self,
         search: str | None = None,
+        status_filter: str | None = None,
         page: int = 1,
         limit: int = 20,
     ) -> tuple[list[User], int]:
         from sqlalchemy import select, func, or_
         query = select(User).where(User.role == "customer")
+
+        if status_filter and status_filter.upper() == 'ACTIVE':
+            query = query.where(User.is_active == True)
+        elif status_filter and status_filter.upper() == 'INACTIVE':
+            query = query.where(User.is_active == False)
+
         if search and search.strip():
             like = f"%{search.strip().lower()}%"
             query = query.where(

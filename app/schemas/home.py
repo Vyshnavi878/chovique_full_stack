@@ -65,9 +65,14 @@ class TestimonialResponse(BaseModel):
 
 class StatsResponse(BaseModel):
     happy_customers: int = 50000
-    unique_flavors: int = 120
-    countries_shipped: int = 15
-    five_star_reviews_percent: int = 98
+    products_available: int = 120
+    orders_delivered: int = 1500
+    customer_rating_percent: int = 98
+
+    # Backward compatibility aliases
+    unique_flavors: Optional[int] = 120
+    countries_shipped: Optional[int] = 15
+    five_star_reviews_percent: Optional[int] = 98
 
 
 # ==========================================================

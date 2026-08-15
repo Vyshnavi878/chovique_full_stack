@@ -63,7 +63,34 @@ class NotificationRepository:
         )
 
         if type_filter and type_filter.lower() != 'all':
-            query = query.where(func.lower(Notification.type) == type_filter.lower())
+            tf = type_filter.lower()
+            if tf in ('orders', 'order'):
+                query = query.where(
+                    (func.lower(Notification.type).like('%order%')) |
+                    (func.lower(Notification.type).like('%payment%'))
+                )
+            elif tf in ('alerts', 'alert'):
+                query = query.where(
+                    (func.lower(Notification.type).like('%stock%')) |
+                    (func.lower(Notification.type).like('%alert%')) |
+                    (func.lower(Notification.type) == 'warning')
+                )
+            elif tf in ('customers', 'customer'):
+                query = query.where(
+                    (func.lower(Notification.type).like('%customer%')) |
+                    (func.lower(Notification.type).like('%user%'))
+                )
+            elif tf == 'system':
+                query = query.where(
+                    (func.lower(Notification.type).like('%system%')) |
+                    (func.lower(Notification.type).like('%platform%')) |
+                    (func.lower(Notification.type) == 'general') |
+                    (func.lower(Notification.type) == 'support_message') |
+                    (func.lower(Notification.type) == 'coupon_usage') |
+                    (func.lower(Notification.type) == 'reward_adjustment')
+                )
+            else:
+                query = query.where(func.lower(Notification.type) == tf)
 
         if is_read_filter is not None:
             query = query.where(Notification.is_read == is_read_filter)
@@ -123,12 +150,13 @@ class NotificationRepository:
         related_entity_type: str | None = None,
         related_entity_id: str | None = None,
     ) -> Notification | None:
-        # Check duplicate
+        # Check duplicate (only if an active unread notification exists)
         if related_entity_type and related_entity_id:
             check_q = select(Notification).where(
                 Notification.type == type,
                 Notification.related_entity_type == related_entity_type,
                 Notification.related_entity_id == related_entity_id,
+                Notification.is_read == False,
             )
             if admin_id:
                 check_q = check_q.where(Notification.admin_id == admin_id)

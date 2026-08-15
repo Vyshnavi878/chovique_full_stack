@@ -465,6 +465,13 @@ class CustomerService:
                     if product:
                         new_stock = max(0, product.stock - item_data["quantity"])
                         await self.product_repo.update(product.id, stock=new_stock, commit=False)
+                        if new_stock <= 10:
+                            try:
+                                from app.services.notification_service import NotificationService
+                                notif_svc = NotificationService(self.db)
+                                await notif_svc.notify_low_stock(product.id, product.name, new_stock)
+                            except Exception as exc:
+                                logger.error("Failed to send low stock notification on checkout: %s", exc)
 
             except Exception as ex:
                 logger.error(f"Error during post-checkout cleanup: {ex}")

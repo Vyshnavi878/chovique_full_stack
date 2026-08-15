@@ -68,13 +68,19 @@ class HomeService:
 
         # Build stats
         stats_data = config_data.get("stats", {})
+        happy_cust = stats_data.get("happy_customers", 50000)
+        prod_avail = stats_data.get("products_available", stats_data.get("unique_flavors", 120))
+        orders_deliv = stats_data.get("orders_delivered", stats_data.get("countries_shipped", 1500))
+        rating_pct = stats_data.get("customer_rating_percent", stats_data.get("five_star_reviews_percent", 98))
+
         stats = StatsResponse(
-            happy_customers=stats_data.get("happy_customers", 50000),
-            unique_flavors=stats_data.get("unique_flavors", 120),
-            countries_shipped=stats_data.get("countries_shipped", 15),
-            five_star_reviews_percent=stats_data.get(
-                "five_star_reviews_percent", 98
-            ),
+            happy_customers=happy_cust,
+            products_available=prod_avail,
+            orders_delivered=orders_deliv,
+            customer_rating_percent=rating_pct,
+            unique_flavors=prod_avail,
+            countries_shipped=orders_deliv,
+            five_star_reviews_percent=rating_pct,
         )
 
         # Build contact
@@ -177,13 +183,19 @@ class HomeService:
         if not stats_data or not isinstance(stats_data, dict):
             return StatsResponse()
 
+        happy_cust = stats_data.get("happy_customers", 50000)
+        prod_avail = stats_data.get("products_available", stats_data.get("unique_flavors", 120))
+        orders_deliv = stats_data.get("orders_delivered", stats_data.get("countries_shipped", 1500))
+        rating_pct = stats_data.get("customer_rating_percent", stats_data.get("five_star_reviews_percent", 98))
+
         return StatsResponse(
-            happy_customers=stats_data.get("happy_customers", 50000),
-            unique_flavors=stats_data.get("unique_flavors", 120),
-            countries_shipped=stats_data.get("countries_shipped", 15),
-            five_star_reviews_percent=stats_data.get(
-                "five_star_reviews_percent", 98
-            ),
+            happy_customers=happy_cust,
+            products_available=prod_avail,
+            orders_delivered=orders_deliv,
+            customer_rating_percent=rating_pct,
+            unique_flavors=prod_avail,
+            countries_shipped=orders_deliv,
+            five_star_reviews_percent=rating_pct,
         )
 
     # ==========================================================

@@ -1404,15 +1404,24 @@ async def get_all_users(
 
 @router.get(
     "/customers",
-    response_model=list[SystemUserResponse],
-    summary="Get all customers",
+    response_model=CustomerListPaginatedResponse,
+    summary="Get all customers with pagination, search, status filter & summary stats (admin only)",
 )
-async def get_all_customers(
+async def get_customers(
+    search: Optional[str] = Query(None, description="Search by name, email, or phone"),
+    status: Optional[str] = Query(None, description="Filter by status: 'ALL', 'ACTIVE', 'INACTIVE'"),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(20, ge=1, le=100, description="Items per page"),
     current_user: User = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
     service = AdminService(db)
-    return await service.get_all_customers()
+    return await service.get_customers_paginated(
+        search=search,
+        status=status,
+        page=page,
+        limit=limit,
+    )
 
 
 @router.get(
@@ -1632,15 +1641,18 @@ async def get_offline_sales(
     "/offline-sales",
     response_model=OfflineSaleResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Manually log a single offline sale (admin only)",
+    summary="Log an offline company/b2b sale (admin only)",
 )
 async def add_offline_sale(
     payload: OfflineSalePayload,
     current_user: User = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
-    service = AdminService(db)
-    return await service.add_offline_sale(payload)
+    try:
+        service = AdminService(db)
+        return await service.add_offline_sale(payload)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.post(
