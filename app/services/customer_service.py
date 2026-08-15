@@ -331,11 +331,15 @@ class CustomerService:
 
             for item in items_to_process:
                 product = await self.product_repo.get_by_id(item.product_id)
-                if not product or not product.is_active:
-                    raise ValueError(f"Product '{item.product_id}' is unavailable.")
+                if not product or not product.is_active or getattr(product, "is_available", True) is False:
+                    pname = product.name if product else item.product_id
+                    raise ValueError(f"Product '{pname}' is currently unavailable for purchase.")
+
+                if product.stock <= 0:
+                    raise ValueError(f"Product '{product.name}' is out of stock.")
 
                 if product.stock < item.quantity:
-                    raise ValueError(f"Insufficient stock for '{product.name}'. Only {product.stock} left.")
+                    raise ValueError(f"Insufficient stock for '{product.name}'. Only {product.stock} units available.")
 
                 item_price = product.price
                 subtotal += item_price * item.quantity
@@ -463,7 +467,9 @@ class CustomerService:
                     # Deduct stock immediately
                     product = await self.product_repo.get_by_id(pid)
                     if product:
-                        new_stock = max(0, product.stock - item_data["quantity"])
+                        if product.stock < item_data["quantity"]:
+                            raise ValueError(f"Insufficient stock for '{product.name}'. Only {product.stock} units available.")
+                        new_stock = product.stock - item_data["quantity"]
                         await self.product_repo.update(product.id, stock=new_stock, commit=False)
                         if new_stock <= 10:
                             try:
