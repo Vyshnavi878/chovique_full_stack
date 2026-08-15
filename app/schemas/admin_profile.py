@@ -44,6 +44,7 @@ class AdminProfileResponse(BaseModel):
     phone: Optional[str] = ""
     address: Optional[str] = ""
     role: str
+    avatar_url: Optional[str] = None
     created_at: datetime
     last_login_at: Optional[datetime] = None
 

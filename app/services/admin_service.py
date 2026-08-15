@@ -423,6 +423,16 @@ class AdminService:
             applicability = "SPECIFIC_CATEGORIES"
             applicable_ids = [cc.category_id for cc in c.categories]
 
+        from datetime import datetime, timezone
+        now_utc = datetime.now(timezone.utc)
+        status_str = "ACTIVE"
+        if not c.is_active:
+            status_str = "INACTIVE"
+        elif c.expires_at:
+            exp_dt = c.expires_at if c.expires_at.tzinfo else c.expires_at.replace(tzinfo=timezone.utc)
+            if exp_dt <= now_utc:
+                status_str = "EXPIRED"
+
         return CouponAdminResponse(
             id=c.id,
             code=c.code,
@@ -439,6 +449,7 @@ class AdminService:
             usage_limit=c.usage_limit or 0,
             per_user_usage_limit=c.per_user_usage_limit or 1,
             is_active=c.is_active if c.is_active is not None else True,
+            status=status_str,
             created_at=c.created_at,
             eligibility_rule=eligibility_rule,
             eligibility_value=eligibility_value,
@@ -844,14 +855,16 @@ class AdminService:
     async def get_customers_paginated(
         self,
         search: Optional[str] = None,
+        status: Optional[str] = None,
         page: int = 1,
         limit: int = 20,
     ) -> CustomerListPaginatedResponse:
         from app.repositories.wallet_repository import WalletRepository
+        from app.schemas.admin import CustomerSummaryStats
         wallet_repo = WalletRepository(self.db)
 
         users, total = await self.user_repo.list_customers_paginated(
-            search=search, page=page, limit=limit
+            search=search, status_filter=status, page=page, limit=limit
         )
 
         items = []
@@ -876,6 +889,18 @@ class AdminService:
                 )
             )
 
+        # Compute summary metrics across all customer accounts and orders in DB
+        all_custs_res = await self.db.execute(select(User).where(User.role == "customer"))
+        all_custs = list(all_custs_res.scalars().all())
+
+        total_customers = len(all_custs)
+        active_accounts = sum(1 for u in all_custs if u.is_active)
+
+        all_orders_res = await self.db.execute(select(Order))
+        all_orders = list(all_orders_res.scalars().all())
+        total_orders_placed = len(all_orders)
+        lifetime_spend = sum(o.total for o in all_orders if getattr(o, 'status', '') != 'Cancelled')
+
         total_pages = max(1, math.ceil(total / limit))
         return CustomerListPaginatedResponse(
             items=items,
@@ -883,6 +908,12 @@ class AdminService:
             page=page,
             limit=limit,
             total_pages=total_pages,
+            summary=CustomerSummaryStats(
+                total_customers=total_customers,
+                active_accounts=active_accounts,
+                total_orders_placed=total_orders_placed,
+                lifetime_spend=lifetime_spend,
+            ),
         )
 
     async def get_customer_orders(self, customer_id: str, page: int = 1, limit: int = 20):
@@ -1272,13 +1303,49 @@ class AdminService:
 
     def _format_sale_response(self, sale: OfflineSale) -> OfflineSaleResponse:
         from datetime import datetime
+        from app.schemas.admin import OfflineSaleItemResponse
+
+        items_res = []
+        if getattr(sale, 'items', None):
+            for it in sale.items:
+                items_res.append(
+                    OfflineSaleItemResponse(
+                        id=str(it.id),
+                        product_id=str(it.product_id) if it.product_id else None,
+                        product_name=it.product_name,
+                        sku=it.sku or getattr(it.product, 'sku', ''),
+                        unit_price=float(it.unit_price or 0.0),
+                        quantity=it.quantity,
+                        line_total=float(it.line_total or 0.0),
+                    )
+                )
+
+        p_name = sale.product_name or (items_res[0].product_name if items_res else "Offline Sale")
+        qty = sale.quantity if sale.quantity is not None else (sum(it.quantity for it in items_res) if items_res else 1)
+        tot_amt = float(sale.total_amount if sale.total_amount is not None else (sale.total_price or 0.0))
+
         return OfflineSaleResponse(
             id=str(sale.id),
-            productName=sale.product_name,
-            quantity=sale.quantity,
-            totalPrice=sale.total_price,
+            receipt_id=getattr(sale, 'receipt_id', None) or str(sale.id),
+            company_name=getattr(sale, 'company_name', None) or "Direct Customer",
+            contact_person=getattr(sale, 'contact_person', None) or "Walk-in",
+            phone=getattr(sale, 'phone', None) or "",
+            email=getattr(sale, 'email', None) or "",
+            address=getattr(sale, 'address', None) or "",
+            payment_method=sale.payment_method or "Cash",
+            subtotal=float(getattr(sale, 'subtotal', None) or tot_amt),
+            discount=float(getattr(sale, 'discount', None) or 0.0),
+            tax=float(getattr(sale, 'tax', None) or 0.0),
+            total_amount=tot_amt,
+            status=getattr(sale, 'status', None) or "Completed",
             date=sale.created_at.strftime("%Y-%m-%d") if sale.created_at else datetime.now().strftime("%Y-%m-%d"),
-            paymentMethod=sale.payment_method,
+            created_at=sale.created_at.strftime("%Y-%m-%d %H:%M:%S") if sale.created_at else "",
+            items=items_res,
+            # Backward compatibility fields for legacy frontend callers
+            productName=p_name,
+            quantity=qty,
+            totalPrice=tot_amt,
+            paymentMethod=sale.payment_method or "Cash",
         )
 
     async def get_offline_sales(self) -> list[OfflineSaleResponse]:
@@ -1286,13 +1353,146 @@ class AdminService:
         return [self._format_sale_response(s) for s in sales]
 
     async def add_offline_sale(self, payload: OfflineSalePayload) -> OfflineSaleResponse:
-        sale = await self.offline_sale_repo.create(
-            product_name=payload.product_name,
-            quantity=payload.quantity,
-            total_price=payload.total_price,
-            payment_method=payload.payment_method,
-        )
-        return self._format_sale_response(sale)
+        import re
+        from datetime import datetime
+        from app.models.offline_sale import OfflineSale, OfflineSaleItem
+
+        # Check if multi-item company transaction or legacy single product payload
+        if payload.items and len(payload.items) > 0:
+            # 1. Mandatory Company details validation
+            if not payload.company_name or not payload.company_name.strip():
+                raise ValueError("Company Name is required.")
+            if not payload.contact_person or not payload.contact_person.strip():
+                raise ValueError("Contact Person is required.")
+            if not payload.phone or not payload.phone.strip():
+                raise ValueError("Phone Number is required.")
+            if not payload.address or not payload.address.strip():
+                raise ValueError("Company Address is required.")
+            if not payload.payment_method or not payload.payment_method.strip():
+                raise ValueError("Payment Method is required.")
+
+            # Email format validation if provided
+            if payload.email and payload.email.strip():
+                if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", payload.email.strip()):
+                    raise ValueError("Please provide a valid email address.")
+
+            # Phone format validation
+            if not re.match(r"^(\+91[\-\s]?)?[0]?[6-9]\d{9}$|^\+?[0-9\s\-()]{7,15}$", payload.phone.strip()):
+                raise ValueError("Please provide a valid phone number.")
+
+            # 2. Database transaction & stock deduction
+            subtotal = 0.0
+            sale_items = []
+
+            for item_data in payload.items:
+                if item_data.quantity <= 0:
+                    raise ValueError("Quantity must be a positive integer.")
+
+                product = await self.product_repo.get_by_id(item_data.product_id)
+                if not product:
+                    raise ValueError(f"Product with ID '{item_data.product_id}' not found.")
+
+                if (product.stock or 0) < item_data.quantity:
+                    raise ValueError(
+                        f"Insufficient stock for '{product.name}'. Available stock: {product.stock or 0}, Requested: {item_data.quantity}"
+                    )
+
+                unit_price = float(product.price or 0.0)
+                line_total = round(unit_price * item_data.quantity, 2)
+                subtotal += line_total
+
+                # Deduct stock from database
+                new_stock = (product.stock or 0) - item_data.quantity
+                await self.product_repo.update(product.id, stock=new_stock)
+
+                sale_items.append({
+                    "product_id": product.id,
+                    "product_name": product.name,
+                    "sku": getattr(product, 'sku', '') or getattr(product, 'id', ''),
+                    "unit_price": unit_price,
+                    "quantity": item_data.quantity,
+                    "line_total": line_total,
+                })
+
+            discount = max(0.0, float(payload.discount or 0.0))
+            tax = max(0.0, float(payload.tax or 0.0))
+            total_amount = round(max(0.0, subtotal - discount + tax), 2)
+
+            # Unique receipt_id
+            now_str = datetime.now().strftime("%Y%m%d")
+            rand_hex = uuid.uuid4().hex[:6].upper()
+            receipt_id = f"OFF-{now_str}-{rand_hex}"
+
+            # Create OfflineSale DB record
+            sale = OfflineSale(
+                receipt_id=receipt_id,
+                company_name=payload.company_name.strip(),
+                contact_person=payload.contact_person.strip(),
+                phone=payload.phone.strip(),
+                email=payload.email.strip() if payload.email else None,
+                address=payload.address.strip(),
+                payment_method=payload.payment_method.strip(),
+                subtotal=subtotal,
+                discount=discount,
+                tax=tax,
+                total_amount=total_amount,
+                status="Completed",
+                # Legacy fields for backward compatibility
+                product_name=sale_items[0]["product_name"] if sale_items else "Offline Sale",
+                quantity=sum(it["quantity"] for it in sale_items),
+                total_price=total_amount,
+            )
+            self.db.add(sale)
+            await self.db.flush()
+
+            # Create OfflineSaleItem records
+            for it in sale_items:
+                item_rec = OfflineSaleItem(
+                    sale_id=sale.id,
+                    product_id=it["product_id"],
+                    product_name=it["product_name"],
+                    sku=it["sku"],
+                    unit_price=it["unit_price"],
+                    quantity=it["quantity"],
+                    line_total=it["line_total"],
+                )
+                self.db.add(item_rec)
+
+            await self.db.commit()
+            await self.db.refresh(sale)
+            return self._format_sale_response(sale)
+        else:
+            # Legacy single-item fallback
+            if not payload.product_name or not payload.product_name.strip():
+                raise ValueError("Product Name is required.")
+            if payload.quantity <= 0:
+                raise ValueError("Quantity must be a positive integer.")
+
+            tot_price = payload.total_price if payload.total_price is not None else 0.0
+            now_str = datetime.now().strftime("%Y%m%d")
+            receipt_id = f"OFF-{now_str}-{uuid.uuid4().hex[:6].upper()}"
+
+            sale = OfflineSale(
+                receipt_id=receipt_id,
+                company_name="Direct Customer",
+                contact_person="Walk-in",
+                phone="N/A",
+                email=None,
+                address="Boutique Counter",
+                payment_method=payload.payment_method or "Cash",
+                subtotal=tot_price,
+                discount=0.0,
+                tax=0.0,
+                total_amount=tot_price,
+                status="Completed",
+                product_name=payload.product_name,
+                quantity=payload.quantity,
+                total_price=tot_price,
+            )
+            self.db.add(sale)
+            await self.db.commit()
+            await self.db.refresh(sale)
+            return self._format_sale_response(sale)
 
     async def import_offline_sales_csv(self, content: bytes) -> ImportSalesResponse:
         """Parse CSV bytes and bulk-insert offline sales."""
@@ -1443,8 +1643,24 @@ class AdminService:
     # ==========================================================
 
     async def set_stats(self, payload: SetStatsRequest) -> StatsResponse:
-        await self.site_config_repo.set("stats", payload.model_dump())
-        return StatsResponse(**payload.model_dump())
+        data = payload.model_dump()
+        happy_cust = data.get("happy_customers", 50000)
+        prod_avail = data.get("products_available") if data.get("products_available") is not None else data.get("unique_flavors", 120)
+        orders_deliv = data.get("orders_delivered") if data.get("orders_delivered") is not None else data.get("countries_shipped", 1500)
+        rating_pct = data.get("customer_rating_percent") if data.get("customer_rating_percent") is not None else data.get("five_star_reviews_percent", 98)
+
+        stats_dict = {
+            "happy_customers": happy_cust,
+            "products_available": prod_avail,
+            "orders_delivered": orders_deliv,
+            "customer_rating_percent": rating_pct,
+            "unique_flavors": prod_avail,
+            "countries_shipped": orders_deliv,
+            "five_star_reviews_percent": rating_pct,
+        }
+
+        await self.site_config_repo.set("stats", stats_dict)
+        return StatsResponse(**stats_dict)
 
     async def set_contact(self, payload: SetContactRequest) -> ContactInfoResponse:
         await self.site_config_repo.set("contact", payload.model_dump())
@@ -1548,11 +1764,38 @@ class AdminService:
     # ==========================================================
 
     async def upload_banner_image(self, banner_id: str, image_file: UploadFile) -> str:
-        """Upload banner image to Cloudinary and return its URL."""
-        return await cloudinary_service.upload_image(
+        """Upload banner image to Cloudinary, cleanup old Cloudinary asset, update DB record and return URL."""
+        banner = await self.banner_repo.get_by_id(banner_id)
+        if not banner:
+            raise ValueError(f"Banner slide with ID '{banner_id}' not found.")
+
+        # Cleanup old Cloudinary image if exists
+        if banner.image and "cloudinary.com" in banner.image:
+            try:
+                parts = banner.image.split("/")
+                if "upload" in parts:
+                    upload_idx = parts.index("upload")
+                    after_upload = parts[upload_idx + 1:]
+                    if after_upload and after_upload[0].startswith("v"):
+                        after_upload = after_upload[1:]
+                    public_id_with_ext = "/".join(after_upload)
+                    public_id = public_id_with_ext.rsplit(".", 1)[0]
+                    if public_id:
+                        await cloudinary_service.delete_image(public_id)
+            except Exception as e:
+                logger.warning("Could not delete previous Cloudinary banner asset: %s", e)
+
+        # Upload new image to Cloudinary
+        new_url = await cloudinary_service.upload_image(
             file=image_file,
             folder="chocolate-world/banners",
         )
+
+        # Update database record
+        banner.image = new_url
+        await self.db.commit()
+        await self.db.refresh(banner)
+        return new_url
 
 
 async def ensure_default_banners_exist(db: AsyncSession) -> None:

@@ -103,12 +103,20 @@ class CustomerListItem(BaseModel):
     created_at: str = ""
 
 
+class CustomerSummaryStats(BaseModel):
+    total_customers: int = 0
+    active_accounts: int = 0
+    total_orders_placed: int = 0
+    lifetime_spend: float = 0.0
+
+
 class CustomerListPaginatedResponse(BaseModel):
     items: list[CustomerListItem]
     total: int
     page: int
     limit: int
     total_pages: int
+    summary: CustomerSummaryStats
 
 
 class CustomerCoinsResponse(BaseModel):
@@ -235,19 +243,65 @@ class AdminOrderListResponse(BaseModel):
 
 # OfflineSale schemas
 
-class OfflineSalePayload(BaseModel):
-    product_name: str
+class OfflineSaleItemPayload(BaseModel):
+    product_id: str
     quantity: int
-    total_price: float
+
+
+class OfflineSalePayload(BaseModel):
+    # Company Details
+    company_name: Optional[str] = None
+    contact_person: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
+
+    # Transaction Details
     payment_method: str = "Cash"
+    discount: float = 0.0
+    tax: float = 0.0
+
+    # Multi-product items
+    items: Optional[list[OfflineSaleItemPayload]] = None
+
+    # Legacy single-product fallback fields
+    product_name: Optional[str] = None
+    quantity: Optional[int] = 1
+    total_price: Optional[float] = None
+
+
+class OfflineSaleItemResponse(BaseModel):
+    id: str
+    product_id: Optional[str] = None
+    product_name: str
+    sku: Optional[str] = None
+    unit_price: float
+    quantity: int
+    line_total: float
 
 
 class OfflineSaleResponse(BaseModel):
     id: str
+    receipt_id: str
+    company_name: str
+    contact_person: str
+    phone: str
+    email: Optional[str] = ""
+    address: str
+    payment_method: str
+    subtotal: float
+    discount: float
+    tax: float
+    total_amount: float
+    status: str
+    date: str
+    created_at: str
+    items: list[OfflineSaleItemResponse] = []
+
+    # Backward compatibility fields for legacy frontend callers
     productName: str
     quantity: int
     totalPrice: float
-    date: str
     paymentMethod: str
 
 
@@ -381,10 +435,15 @@ class ReelResponse(BaseModel):
 # ======================================================
 
 class SetStatsRequest(BaseModel):
-    happy_customers: int
-    unique_flavors: int
-    countries_shipped: int
-    five_star_reviews_percent: int
+    happy_customers: int = 50000
+    products_available: Optional[int] = 120
+    orders_delivered: Optional[int] = 1500
+    customer_rating_percent: Optional[int] = 98
+
+    # Optional legacy fallback fields
+    unique_flavors: Optional[int] = None
+    countries_shipped: Optional[int] = None
+    five_star_reviews_percent: Optional[int] = None
 
 
 class SetContactRequest(BaseModel):

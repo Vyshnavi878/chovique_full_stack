@@ -124,6 +124,7 @@ class CouponAdminResponse(BaseModel):
     usage_limit: int
     per_user_usage_limit: int
     is_active: bool
+    status: str = "ACTIVE"
     created_at: datetime
     
     # Metadata for admin

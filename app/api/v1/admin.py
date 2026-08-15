@@ -1,13 +1,18 @@
 import logging
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import select, func, and_, distinct, text, inspect
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_role
 from app.models.user import User
+from app.models.order import Order, OrderItem
+from app.models.product import Product
 from app.schemas.admin import (
     AdminOrderListResponse,
     AuditLogEntry,
@@ -112,6 +117,27 @@ async def update_admin_profile(
     await db.commit()
     await db.refresh(current_user)
     return AdminProfileResponse.model_validate(current_user)
+
+
+from app.schemas.user import AvatarUploadResponse
+from app.services.customer_service import CustomerService
+
+@router.post("/profile/avatar", response_model=AvatarUploadResponse, summary="Upload authenticated admin profile avatar")
+async def upload_admin_avatar(
+    avatar: UploadFile = File(...),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    allowed_mimes = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
+    filename = avatar.filename or ""
+    ext = filename.split(".")[-1].lower() if "." in filename else ""
+    if (avatar.content_type and avatar.content_type.lower() not in allowed_mimes) and ext not in ["jpg", "jpeg", "png", "webp"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid image format. Only JPG, JPEG, PNG, and WebP formats are allowed.",
+        )
+    service = CustomerService(db)
+    return await service.upload_avatar(current_user.id, avatar)
 
 
 # ======================================================
@@ -1378,15 +1404,24 @@ async def get_all_users(
 
 @router.get(
     "/customers",
-    response_model=list[SystemUserResponse],
-    summary="Get all customers",
+    response_model=CustomerListPaginatedResponse,
+    summary="Get all customers with pagination, search, status filter & summary stats (admin only)",
 )
-async def get_all_customers(
+async def get_customers(
+    search: Optional[str] = Query(None, description="Search by name, email, or phone"),
+    status: Optional[str] = Query(None, description="Filter by status: 'ALL', 'ACTIVE', 'INACTIVE'"),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(20, ge=1, le=100, description="Items per page"),
     current_user: User = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
     service = AdminService(db)
-    return await service.get_all_customers()
+    return await service.get_customers_paginated(
+        search=search,
+        status=status,
+        page=page,
+        limit=limit,
+    )
 
 
 @router.get(
@@ -1606,15 +1641,18 @@ async def get_offline_sales(
     "/offline-sales",
     response_model=OfflineSaleResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Manually log a single offline sale (admin only)",
+    summary="Log an offline company/b2b sale (admin only)",
 )
 async def add_offline_sale(
     payload: OfflineSalePayload,
     current_user: User = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
-    service = AdminService(db)
-    return await service.add_offline_sale(payload)
+    try:
+        service = AdminService(db)
+        return await service.add_offline_sale(payload)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.post(

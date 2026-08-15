@@ -62,7 +62,6 @@ class SystemSecuritySchema(BaseModel):
     admin_session_timeout: int = Field(..., ge=5, le=1440)
     max_login_attempts: int = Field(..., ge=1, le=20)
     account_lockout_duration: int = Field(..., ge=1, le=1440)
-    require_admin_password_change: bool = False
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -106,7 +105,6 @@ class PlatformSettingsResponse(BaseModel):
     admin_session_timeout: int
     max_login_attempts: int
     account_lockout_duration: int
-    require_admin_password_change: bool
 
     updated_at: datetime
     updated_by: Optional[str] = None

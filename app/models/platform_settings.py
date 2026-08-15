@@ -47,7 +47,6 @@ class PlatformSettings(Base):
     admin_session_timeout = Column(Integer, nullable=False, default=60)      # minutes
     max_login_attempts = Column(Integer, nullable=False, default=5)
     account_lockout_duration = Column(Integer, nullable=False, default=30)   # minutes
-    require_admin_password_change = Column(Boolean, nullable=False, default=False)
 
     # ── Audit ──────────────────────────────────────────────────────────────
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

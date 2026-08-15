@@ -32,6 +32,12 @@ class RefundService:
         """
         Execute partial or full refund for an order via Razorpay & record audit.
         """
+        from app.repositories.platform_settings_repository import PlatformSettingsRepository
+        ps_repo = PlatformSettingsRepository(self.db)
+        ps = await ps_repo.get()
+        if not ps.return_refund_enabled:
+            raise ValueError("Return and refund functionality is currently disabled by system configuration.")
+
         order = await self.order_repo.get_by_id(payload.order_id)
         if not order:
             raise ValueError("Order not found.")

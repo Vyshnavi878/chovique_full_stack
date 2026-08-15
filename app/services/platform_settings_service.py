@@ -136,7 +136,6 @@ class PlatformSettingsService:
             "admin_session_timeout": 60,
             "max_login_attempts": 5,
             "account_lockout_duration": 30,
-            "require_admin_password_change": False,
             "updated_by": current_user.id,
         }
 

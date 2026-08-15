@@ -20,6 +20,7 @@ class SupportTicket(Base):
     customer_name = Column(String(120), nullable=False)
     category = Column(String(100), nullable=False)
     description = Column(Text, nullable=False)
+    order_id = Column(String(36), ForeignKey("orders.id", ondelete="SET NULL"), nullable=True, index=True)
     status = Column(String(50), default="Pending", nullable=False)
     admin_notes = Column(Text, nullable=True)
     customer_resolution_feedback = Column(String(50), nullable=True)
@@ -28,3 +29,4 @@ class SupportTicket(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     customer = relationship("User")
+    order = relationship("Order")

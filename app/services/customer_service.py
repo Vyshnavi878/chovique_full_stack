@@ -294,10 +294,23 @@ class CustomerService:
             if not phone_clean or not phone_clean.isdigit() or len(phone_clean) != 10:
                 raise ValueError("Phone number must contain exactly 10 numeric digits.")
 
+            # Validate Guest Checkout, COD, and Minimum Order Value via PlatformSettings
+            from app.repositories.platform_settings_repository import PlatformSettingsRepository
+            ps_repo = PlatformSettingsRepository(self.db)
+            ps = await ps_repo.get()
+
+            user_obj = await self.user_repo.get_by_id(user_id)
+            if user_obj and getattr(user_obj, "is_guest", False) and not ps.guest_checkout_enabled:
+                raise ValueError("Guest checkout is currently disabled by system configuration.")
+
             # Validate Payment Method
             valid_methods = ["Credit Card", "UPI / Google Pay", "Net Banking", "Cash on Delivery"]
             if not payload.payment_method or payload.payment_method not in valid_methods:
                 raise ValueError("Please select a valid payment option.")
+
+            is_cod = payload.payment_method in ("Cash on Delivery", "COD", "Cash On Delivery")
+            if is_cod and not ps.cod_enabled:
+                raise ValueError("Cash on Delivery (COD) is currently disabled by system configuration.")
 
             subtotal = 0.0
             items_data = []
@@ -318,11 +331,15 @@ class CustomerService:
 
             for item in items_to_process:
                 product = await self.product_repo.get_by_id(item.product_id)
-                if not product or not product.is_active:
-                    raise ValueError(f"Product '{item.product_id}' is unavailable.")
+                if not product or not product.is_active or getattr(product, "is_available", True) is False:
+                    pname = product.name if product else item.product_id
+                    raise ValueError(f"Product '{pname}' is currently unavailable for purchase.")
+
+                if product.stock <= 0:
+                    raise ValueError(f"Product '{product.name}' is out of stock.")
 
                 if product.stock < item.quantity:
-                    raise ValueError(f"Insufficient stock for '{product.name}'. Only {product.stock} left.")
+                    raise ValueError(f"Insufficient stock for '{product.name}'. Only {product.stock} units available.")
 
                 item_price = product.price
                 subtotal += item_price * item.quantity
@@ -360,9 +377,19 @@ class CustomerService:
                 coins_used = redemption_calc.allowed_coins
                 coin_discount = redemption_calc.coin_discount
 
+            if ps.minimum_order_value > 0 and subtotal < ps.minimum_order_value:
+                raise ValueError(f"Minimum order value required is ₹{ps.minimum_order_value:.2f}.")
+
+            if is_cod and ps.maximum_cod_order_value > 0 and subtotal > ps.maximum_cod_order_value:
+                raise ValueError(f"Cash on Delivery is not available for order subtotal exceeding ₹{ps.maximum_cod_order_value:.2f}.")
+
             total_discount = coupon_discount + coin_discount
-            shipping = 0.0 if subtotal > 1500 else 99.0
-            tax = round(subtotal * 0.05, 2)  # 5% GST
+            if ps.free_shipping_min_order > 0 and subtotal >= ps.free_shipping_min_order:
+                shipping = 0.0
+            else:
+                shipping = ps.standard_shipping_charge
+
+            tax = round(subtotal * (ps.gst_rate / 100.0), 2)
             total = max(0.0, subtotal - total_discount + shipping + tax)
             total = round(total, 2)
 
@@ -440,8 +467,17 @@ class CustomerService:
                     # Deduct stock immediately
                     product = await self.product_repo.get_by_id(pid)
                     if product:
-                        new_stock = max(0, product.stock - item_data["quantity"])
+                        if product.stock < item_data["quantity"]:
+                            raise ValueError(f"Insufficient stock for '{product.name}'. Only {product.stock} units available.")
+                        new_stock = product.stock - item_data["quantity"]
                         await self.product_repo.update(product.id, stock=new_stock, commit=False)
+                        if new_stock <= 10:
+                            try:
+                                from app.services.notification_service import NotificationService
+                                notif_svc = NotificationService(self.db)
+                                await notif_svc.notify_low_stock(product.id, product.name, new_stock)
+                            except Exception as exc:
+                                logger.error("Failed to send low stock notification on checkout: %s", exc)
 
             except Exception as ex:
                 logger.error(f"Error during post-checkout cleanup: {ex}")
@@ -506,9 +542,26 @@ class CustomerService:
             order = await self.order_repo.get_by_id(order_id)
             if not order or order.user_id != user_id:
                 return None
-            
+
+            from app.repositories.platform_settings_repository import PlatformSettingsRepository
+            ps_repo = PlatformSettingsRepository(self.db)
+            ps = await ps_repo.get()
+
+            if not ps.order_cancellation_enabled:
+                raise ValueError("Order cancellation is currently disabled by system configuration.")
+
             if order.status != "Processing":
                 raise ValueError("Order cannot be cancelled in its current state.")
+
+            if ps.cancellation_time_limit > 0 and order.created_at:
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc)
+                created_at = order.created_at
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
+                diff_hours = (now - created_at).total_seconds() / 3600.0
+                if diff_hours > ps.cancellation_time_limit:
+                    raise ValueError(f"Order cancellation time limit ({ps.cancellation_time_limit} hours) has passed.")
 
             order.status = "Cancelled"
 
@@ -608,11 +661,21 @@ class CustomerService:
         payload: CreateTicketPayload,
     ) -> SupportTicketResponse:
 
+        order_id_val = payload.order_id or payload.orderId
+        linked_order_id = None
+        if order_id_val and str(order_id_val).strip():
+            clean_oid = str(order_id_val).strip()
+            order = await self.order_repo.get_by_id(clean_oid)
+            if not order or order.user_id != user.id:
+                raise ValueError("Selected order does not belong to you or does not exist.")
+            linked_order_id = order.id
+
         ticket = await self.ticket_repo.create(
             customer_id=user.id,
             customer_name=user.full_name,
             category=payload.category,
             description=payload.description,
+            order_id=linked_order_id,
             status="Pending",
         )
 
@@ -638,6 +701,28 @@ class CustomerService:
 
         return self._format_ticket_response(ticket)
 
+    async def get_ticket_related_order(self, ticket_id: str, user: User) -> OrderResponse:
+        ticket = await self.ticket_repo.get_by_id(ticket_id)
+        if not ticket:
+            raise ValueError("Support ticket not found.")
+
+        # Security check: User must own the ticket (or be Admin)
+        if user.role not in ["admin", "superadmin"] and ticket.customer_id != user.id:
+            raise ValueError("Access denied to this support ticket.")
+
+        if not ticket.order_id:
+            raise ValueError("No related order linked to this support ticket.")
+
+        order = await self.order_repo.get_by_id(ticket.order_id)
+        if not order:
+            raise ValueError("Related order not found.")
+
+        # Security check: User must own the order (or be Admin)
+        if user.role not in ["admin", "superadmin"] and order.user_id != user.id:
+            raise ValueError("Related order does not belong to you.")
+
+        return self._format_order_response(order)
+
     async def submit_ticket_feedback(
         self,
         ticket_id: str,
@@ -654,6 +739,7 @@ class CustomerService:
 
     def _format_ticket_response(self, ticket) -> SupportTicketResponse:
         created_date = ticket.created_at.strftime("%Y-%m-%d") if ticket.created_at else datetime.now().strftime("%Y-%m-%d")
+        ord_id = getattr(ticket, "order_id", None)
 
         return SupportTicketResponse(
             id=ticket.id,
@@ -662,6 +748,8 @@ class CustomerService:
             category=ticket.category,
             description=ticket.description,
             status=ticket.status,
+            orderId=ord_id,
+            order_id=ord_id,
             adminNotes=ticket.admin_notes,
             customerResolutionFeedback=ticket.customer_resolution_feedback,
             date=created_date,
