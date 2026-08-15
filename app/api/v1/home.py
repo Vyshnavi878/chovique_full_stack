@@ -7,12 +7,14 @@ from app.api.deps import get_current_user_optional
 from app.db.session import get_db
 from app.models.user import User
 from app.services.home_service import HomeService
+from app.services.platform_settings_service import PlatformSettingsService
 from app.schemas.home import (
     BannerResponse,
     ContactInfoResponse,
     HomePageResponse,
     StatsResponse,
     TestimonialResponse,
+    StoreConfigResponse,
 )
 
 router = APIRouter(prefix="/home", tags=["Home Page"])
@@ -45,6 +47,37 @@ async def get_home_page(
 
     service = HomeService(db)
     return await service.get_home_page_data()
+
+
+# ======================================================
+# GET STORE CONFIG
+# ======================================================
+
+@router.get(
+    "/store-config",
+    response_model=StoreConfigResponse,
+    summary="Get public store configuration",
+)
+async def get_store_config(
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Returns public-facing store configuration for dynamic
+    shipping, tax, and order calculations on the frontend.
+    """
+    service = PlatformSettingsService(db)
+    settings = await service.get_settings()
+    
+    return StoreConfigResponse(
+        standard_shipping_charge=settings.standard_shipping_charge,
+        free_shipping_min_order=settings.free_shipping_min_order,
+        gst_rate=settings.gst_rate,
+        cod_enabled=settings.cod_enabled,
+        minimum_order_value=settings.minimum_order_value,
+        maximum_cod_order_value=settings.maximum_cod_order_value,
+        base_currency=settings.base_currency,
+        store_front_name=settings.store_front_name,
+    )
 
 
 # ======================================================

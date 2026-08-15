@@ -77,7 +77,7 @@ class NotificationService:
     # EVENT TRIGGER HELPERS
     # ======================================================
 
-    async def notify_new_order(self, order_id: str, order_number: str, total_amount: float):
+    async def notify_new_order(self, order_id: str, order_number: str, total_amount: float, commit: bool = True):
         """Notification type: new_order"""
         try:
             title = "New Order Received"
@@ -89,11 +89,12 @@ class NotificationService:
                 message=message,
                 related_entity_type="order",
                 related_entity_id=order_id,
+                commit=commit
             )
         except Exception as e:
             logger.error("Failed to create new_order notification: %s", e)
 
-    async def notify_low_stock(self, product_id: str, product_name: str, stock: int):
+    async def notify_low_stock(self, product_id: str, product_name: str, stock: int, commit: bool = True):
         """Notification type: low_stock"""
         try:
             title = "Low Stock Alert"
@@ -105,11 +106,12 @@ class NotificationService:
                 message=message,
                 related_entity_type="product",
                 related_entity_id=product_id,
+                commit=commit
             )
         except Exception as e:
             logger.error("Failed to create low_stock notification: %s", e)
 
-    async def notify_new_customer(self, user_id: str, full_name: str):
+    async def notify_new_customer(self, user_id: str, full_name: str, commit: bool = True):
         """Notification type: new_customer"""
         try:
             title = "New Customer Registered"
@@ -121,11 +123,12 @@ class NotificationService:
                 message=message,
                 related_entity_type="customer",
                 related_entity_id=user_id,
+                commit=commit
             )
         except Exception as e:
             logger.error("Failed to create new_customer notification: %s", e)
 
-    async def notify_payment_failure(self, order_id: str, order_number: str, reason: str = ""):
+    async def notify_payment_failure(self, order_id: str, order_number: str, reason: str = "", commit: bool = True):
         """Notification type: payment_failure"""
         try:
             title = "Payment Failed"
@@ -139,11 +142,12 @@ class NotificationService:
                 message=message,
                 related_entity_type="order",
                 related_entity_id=order_id,
+                commit=commit
             )
         except Exception as e:
             logger.error("Failed to create payment_failure notification: %s", e)
 
-    async def notify_coupon_usage(self, coupon_code: str, order_id: str, user_name: str = "Customer"):
+    async def notify_coupon_usage(self, coupon_code: str, order_id: str, user_name: str = "Customer", commit: bool = True):
         """Notification type: coupon_usage"""
         try:
             title = "Coupon Used"
@@ -155,11 +159,12 @@ class NotificationService:
                 message=message,
                 related_entity_type="coupon",
                 related_entity_id=coupon_code,
+                commit=commit
             )
         except Exception as e:
             logger.error("Failed to create coupon_usage notification: %s", e)
 
-    async def notify_support_message(self, ticket_id: str, user_name: str, subject: str):
+    async def notify_support_message(self, ticket_id: str, user_name: str, subject: str, commit: bool = True):
         """Notification type: support_message"""
         try:
             title = "Customer Support Message"
@@ -171,11 +176,12 @@ class NotificationService:
                 message=message,
                 related_entity_type="ticket",
                 related_entity_id=ticket_id,
+                commit=commit
             )
         except Exception as e:
             logger.error("Failed to create support_message notification: %s", e)
 
-    async def notify_reward_adjustment(self, user_id: str, user_name: str, coin_change: int, reason: str = ""):
+    async def notify_reward_adjustment(self, user_id: str, user_name: str, coin_change: int, reason: str = "", commit: bool = True):
         """Notification type: reward_adjustment"""
         try:
             sign = "+" if coin_change > 0 else ""
@@ -190,6 +196,7 @@ class NotificationService:
                 message=message,
                 related_entity_type="customer",
                 related_entity_id=user_id,
+                commit=commit
             )
         except Exception as e:
             logger.error("Failed to create reward_adjustment notification: %s", e)

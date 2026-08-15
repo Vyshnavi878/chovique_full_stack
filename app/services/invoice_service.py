@@ -215,7 +215,7 @@ class InvoiceService:
                     <td style="text-align: right; padding: 8px 10px;">₹{order.shipping:.2f}</td>
                 </tr>
                 <tr>
-                    <td colspan="3" style="text-align: right; padding: 8px 10px; color: #555;">GST (5%)</td>
+                    <td colspan="3" style="text-align: right; padding: 8px 10px; color: #555;">Tax (GST)</td>
                     <td style="text-align: right; padding: 8px 10px;">₹{order.tax:.2f}</td>
                 </tr>
                 <tr style="font-size: 1.25em; background: #faf8f5;">

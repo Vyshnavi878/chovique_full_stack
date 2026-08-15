@@ -149,6 +149,7 @@ class NotificationRepository:
         message: str,
         related_entity_type: str | None = None,
         related_entity_id: str | None = None,
+        commit: bool = True,
     ) -> Notification | None:
         # Check duplicate (only if an active unread notification exists)
         if related_entity_type and related_entity_id:
@@ -177,6 +178,9 @@ class NotificationRepository:
             read=False,
         )
         self.db.add(notif)
-        await self.db.commit()
-        await self.db.refresh(notif)
+        if commit:
+            await self.db.commit()
+            await self.db.refresh(notif)
+        else:
+            await self.db.flush()
         return notif

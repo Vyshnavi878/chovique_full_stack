@@ -108,3 +108,17 @@ class HomePageResponse(BaseModel):
     faqs: list[FAQResponse] = []
     stats: StatsResponse = StatsResponse()
     contact: ContactInfoResponse = ContactInfoResponse()
+
+# ==========================================================
+# Store Config Response
+# ==========================================================
+
+class StoreConfigResponse(BaseModel):
+    standard_shipping_charge: float
+    free_shipping_min_order: float
+    gst_rate: float
+    cod_enabled: bool
+    minimum_order_value: float
+    maximum_cod_order_value: float
+    base_currency: str
+    store_front_name: str

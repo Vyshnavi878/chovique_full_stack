@@ -475,7 +475,7 @@ class CustomerService:
                             try:
                                 from app.services.notification_service import NotificationService
                                 notif_svc = NotificationService(self.db)
-                                await notif_svc.notify_low_stock(product.id, product.name, new_stock)
+                                await notif_svc.notify_low_stock(product.id, product.name, new_stock, commit=False)
                             except Exception as exc:
                                 logger.error("Failed to send low stock notification on checkout: %s", exc)
 

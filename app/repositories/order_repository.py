@@ -111,9 +111,9 @@ class OrderRepository:
         try:
             from app.services.notification_service import NotificationService
             notif_service = NotificationService(self.db)
-            await notif_service.notify_new_order(order.id, order.id, order.total)
+            await notif_service.notify_new_order(order.id, order.id, order.total, commit=commit)
             if coupon_code:
-                await notif_service.notify_coupon_usage(coupon_code, order.id)
+                await notif_service.notify_coupon_usage(coupon_code, order.id, commit=commit)
             
             # Check stock levels for low stock alerts
             for item_info in items_data:
@@ -123,7 +123,7 @@ class OrderRepository:
                     prod_res = await self.db.execute(select(Product).where(Product.id == pid))
                     prod = prod_res.scalar_one_or_none()
                     if prod and prod.stock <= 5:
-                        await notif_service.notify_low_stock(prod.id, prod.name, prod.stock)
+                        await notif_service.notify_low_stock(prod.id, prod.name, prod.stock, commit=commit)
         except Exception:
             pass
 
