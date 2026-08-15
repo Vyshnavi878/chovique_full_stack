@@ -59,8 +59,9 @@ async def lifespan(app: FastAPI):
                         pass
                 try:
                     await autocommit_conn.execute(text("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS coupon_type VARCHAR(50) DEFAULT 'CUSTOMER';"))
+                    await autocommit_conn.execute(text("ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS order_id VARCHAR(36);"))
                 except Exception as ex:
-                    logger.warning("Coupons migration note: %s", ex)
+                    logger.warning("Auto migration note: %s", ex)
                 logger.info("Database auto-migrations executed successfully.")
     except Exception as e:
         logger.warning("Database migration note: %s", e)

@@ -34,8 +34,11 @@ async def create_ticket(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    service = CustomerService(db)
-    return await service.create_ticket(current_user, payload)
+    try:
+        service = CustomerService(db)
+        return await service.create_ticket(current_user, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.get(
@@ -53,6 +56,24 @@ async def get_ticket(
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found.")
     return ticket
+
+
+@router.get(
+    "/{ticket_id}/related-order",
+    summary="Get related order details for a support ticket",
+)
+async def get_ticket_related_order(
+    ticket_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = CustomerService(db)
+        return await service.get_ticket_related_order(ticket_id, current_user)
+    except ValueError as e:
+        msg = str(e)
+        status_code = status.HTTP_404_NOT_FOUND if "not found" in msg.lower() else status.HTTP_403_FORBIDDEN if "denied" in msg.lower() or "belong" in msg.lower() else status.HTTP_400_BAD_REQUEST
+        raise HTTPException(status_code=status_code, detail=msg)
 
 
 @router.post(

@@ -5,6 +5,8 @@ from pydantic import BaseModel, ConfigDict
 class CreateTicketPayload(BaseModel):
     category: str
     description: str
+    order_id: Optional[str] = None
+    orderId: Optional[str] = None
 
 
 class TicketFeedbackPayload(BaseModel):
@@ -18,6 +20,8 @@ class SupportTicketResponse(BaseModel):
     category: str
     description: str
     status: str
+    orderId: Optional[str] = None
+    order_id: Optional[str] = None
     adminNotes: Optional[str] = None
     customerResolutionFeedback: Optional[str] = None
     date: str

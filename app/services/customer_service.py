@@ -661,11 +661,21 @@ class CustomerService:
         payload: CreateTicketPayload,
     ) -> SupportTicketResponse:
 
+        order_id_val = payload.order_id or payload.orderId
+        linked_order_id = None
+        if order_id_val and str(order_id_val).strip():
+            clean_oid = str(order_id_val).strip()
+            order = await self.order_repo.get_by_id(clean_oid)
+            if not order or order.user_id != user.id:
+                raise ValueError("Selected order does not belong to you or does not exist.")
+            linked_order_id = order.id
+
         ticket = await self.ticket_repo.create(
             customer_id=user.id,
             customer_name=user.full_name,
             category=payload.category,
             description=payload.description,
+            order_id=linked_order_id,
             status="Pending",
         )
 
@@ -691,6 +701,28 @@ class CustomerService:
 
         return self._format_ticket_response(ticket)
 
+    async def get_ticket_related_order(self, ticket_id: str, user: User) -> OrderResponse:
+        ticket = await self.ticket_repo.get_by_id(ticket_id)
+        if not ticket:
+            raise ValueError("Support ticket not found.")
+
+        # Security check: User must own the ticket (or be Admin)
+        if user.role not in ["admin", "superadmin"] and ticket.customer_id != user.id:
+            raise ValueError("Access denied to this support ticket.")
+
+        if not ticket.order_id:
+            raise ValueError("No related order linked to this support ticket.")
+
+        order = await self.order_repo.get_by_id(ticket.order_id)
+        if not order:
+            raise ValueError("Related order not found.")
+
+        # Security check: User must own the order (or be Admin)
+        if user.role not in ["admin", "superadmin"] and order.user_id != user.id:
+            raise ValueError("Related order does not belong to you.")
+
+        return self._format_order_response(order)
+
     async def submit_ticket_feedback(
         self,
         ticket_id: str,
@@ -707,6 +739,7 @@ class CustomerService:
 
     def _format_ticket_response(self, ticket) -> SupportTicketResponse:
         created_date = ticket.created_at.strftime("%Y-%m-%d") if ticket.created_at else datetime.now().strftime("%Y-%m-%d")
+        ord_id = getattr(ticket, "order_id", None)
 
         return SupportTicketResponse(
             id=ticket.id,
@@ -715,6 +748,8 @@ class CustomerService:
             category=ticket.category,
             description=ticket.description,
             status=ticket.status,
+            orderId=ord_id,
+            order_id=ord_id,
             adminNotes=ticket.admin_notes,
             customerResolutionFeedback=ticket.customer_resolution_feedback,
             date=created_date,
