@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.user_repository import UserRepository
 from app.repositories.refresh_token_repository import RefreshTokenRepository
+from app.repositories.platform_settings_repository import PlatformSettingsRepository
 
 from app.schemas.auth import RegisterRequest, LoginRequest
 
@@ -54,6 +55,11 @@ class AuthService:
     ):
 
         logger.info("Registration attempt for email=%s", request.email)
+
+        ps_repo = PlatformSettingsRepository(self.db)
+        ps = await ps_repo.get()
+        if not ps.customer_registration_enabled:
+            raise ValueError("Customer registration is currently disabled by system configuration.")
 
         # Check password confirmation
 
@@ -246,23 +252,66 @@ class AuthService:
             )
 
 
-        # Verify password
+        ps_repo = PlatformSettingsRepository(self.db)
+        ps = await ps_repo.get()
 
+        # Check lockout
+        lockout_key = f"login_lockout:{request.email.lower()}"
+        attempts_key = f"login_attempts:{request.email.lower()}"
+
+        try:
+            from app.core.redis import redis_client
+            is_locked = await redis_client.get(lockout_key)
+            if is_locked:
+                ttl = await redis_client.ttl(lockout_key)
+                mins = max(1, (ttl + 59) // 60)
+                raise ValueError(f"Account is temporarily locked due to too many failed login attempts. Please try again in {mins} minutes.")
+        except ValueError:
+            raise
+        except Exception:
+            pass
+
+        # Verify password
         if not verify_password(
             request.password,
             user.hashed_password,
         ):
+            try:
+                from app.core.redis import redis_client
+                attempts = await redis_client.incr(attempts_key)
+                await redis_client.expire(attempts_key, 3600)
+                if attempts >= ps.max_login_attempts:
+                    lockout_secs = ps.account_lockout_duration * 60
+                    await redis_client.setex(lockout_key, lockout_secs, "locked")
+                    await redis_client.delete(attempts_key)
+                    raise ValueError(f"Too many failed login attempts. Account locked for {ps.account_lockout_duration} minutes.")
+            except ValueError:
+                raise
+            except Exception:
+                pass
 
             raise ValueError(
                 "Invalid email or password."
             )
 
+        # Success: clear lockout counters
+        try:
+            from app.core.redis import redis_client
+            await redis_client.delete(attempts_key)
+            await redis_client.delete(lockout_key)
+        except Exception:
+            pass
 
-        # Create tokens
-
-        access_token = create_access_token(
-            str(user.id)
-        )
+        # Create tokens (apply admin_session_timeout if user is admin/superadmin)
+        if user.role in ("admin", "superadmin") and ps.admin_session_timeout > 0:
+            access_token = create_access_token(
+                str(user.id),
+                expires_delta=timedelta(minutes=ps.admin_session_timeout),
+            )
+        else:
+            access_token = create_access_token(
+                str(user.id)
+            )
 
 
         refresh_token, jti = create_refresh_token(

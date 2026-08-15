@@ -46,18 +46,24 @@ def verify_password(
 # Create Access Token
 # ==========================================================
 
+from typing import Optional
+
 def create_access_token(
     subject: str,
+    expires_delta: Optional[timedelta] = None,
 ) -> str:
 
 
-    expire = (
-        datetime.now(timezone.utc)
-        +
-        timedelta(
-            minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = (
+            datetime.now(timezone.utc)
+            +
+            timedelta(
+                minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+            )
         )
-    )
 
 
     payload = {

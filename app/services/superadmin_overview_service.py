@@ -21,7 +21,7 @@ from app.schemas.superadmin_overview import (
 
 logger = logging.getLogger(__name__)
 
-VALID_PAID_STATUSES = ["Paid", "Delivered", "Shipped", "Processing"]
+VALID_PAID_STATUSES = ["Paid", "Delivered", "Shipped", "Processing", "Confirmed", "Completed", "Out_For_Delivery"]
 
 
 def calculate_pct_change(current: float, previous: float) -> float:
@@ -317,21 +317,7 @@ class SuperadminOverviewService:
                 )
             )
 
-        # If no online order items found in date range, fallback to top products from offline sales or general products
-        if not top_selling_products:
-            general_prods_res = await self.db.execute(
-                select(Product).order_by(Product.stock.asc()).limit(3)
-            )
-            for prod in general_prods_res.scalars().all():
-                top_selling_products.append(
-                    TopSellingProductOverview(
-                        id=prod.id,
-                        name=prod.name,
-                        image_url=prod.image,
-                        units_sold=0,
-                        revenue=0.0,
-                    )
-                )
+
 
         # -----------------------------------------------------
         # 8. Recent Activity Logs

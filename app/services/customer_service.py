@@ -294,10 +294,23 @@ class CustomerService:
             if not phone_clean or not phone_clean.isdigit() or len(phone_clean) != 10:
                 raise ValueError("Phone number must contain exactly 10 numeric digits.")
 
+            # Validate Guest Checkout, COD, and Minimum Order Value via PlatformSettings
+            from app.repositories.platform_settings_repository import PlatformSettingsRepository
+            ps_repo = PlatformSettingsRepository(self.db)
+            ps = await ps_repo.get()
+
+            user_obj = await self.user_repo.get_by_id(user_id)
+            if user_obj and getattr(user_obj, "is_guest", False) and not ps.guest_checkout_enabled:
+                raise ValueError("Guest checkout is currently disabled by system configuration.")
+
             # Validate Payment Method
             valid_methods = ["Credit Card", "UPI / Google Pay", "Net Banking", "Cash on Delivery"]
             if not payload.payment_method or payload.payment_method not in valid_methods:
                 raise ValueError("Please select a valid payment option.")
+
+            is_cod = payload.payment_method in ("Cash on Delivery", "COD", "Cash On Delivery")
+            if is_cod and not ps.cod_enabled:
+                raise ValueError("Cash on Delivery (COD) is currently disabled by system configuration.")
 
             subtotal = 0.0
             items_data = []
@@ -360,9 +373,19 @@ class CustomerService:
                 coins_used = redemption_calc.allowed_coins
                 coin_discount = redemption_calc.coin_discount
 
+            if ps.minimum_order_value > 0 and subtotal < ps.minimum_order_value:
+                raise ValueError(f"Minimum order value required is ₹{ps.minimum_order_value:.2f}.")
+
+            if is_cod and ps.maximum_cod_order_value > 0 and subtotal > ps.maximum_cod_order_value:
+                raise ValueError(f"Cash on Delivery is not available for order subtotal exceeding ₹{ps.maximum_cod_order_value:.2f}.")
+
             total_discount = coupon_discount + coin_discount
-            shipping = 0.0 if subtotal > 1500 else 99.0
-            tax = round(subtotal * 0.05, 2)  # 5% GST
+            if ps.free_shipping_min_order > 0 and subtotal >= ps.free_shipping_min_order:
+                shipping = 0.0
+            else:
+                shipping = ps.standard_shipping_charge
+
+            tax = round(subtotal * (ps.gst_rate / 100.0), 2)
             total = max(0.0, subtotal - total_discount + shipping + tax)
             total = round(total, 2)
 
@@ -506,9 +529,26 @@ class CustomerService:
             order = await self.order_repo.get_by_id(order_id)
             if not order or order.user_id != user_id:
                 return None
-            
+
+            from app.repositories.platform_settings_repository import PlatformSettingsRepository
+            ps_repo = PlatformSettingsRepository(self.db)
+            ps = await ps_repo.get()
+
+            if not ps.order_cancellation_enabled:
+                raise ValueError("Order cancellation is currently disabled by system configuration.")
+
             if order.status != "Processing":
                 raise ValueError("Order cannot be cancelled in its current state.")
+
+            if ps.cancellation_time_limit > 0 and order.created_at:
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc)
+                created_at = order.created_at
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
+                diff_hours = (now - created_at).total_seconds() / 3600.0
+                if diff_hours > ps.cancellation_time_limit:
+                    raise ValueError(f"Order cancellation time limit ({ps.cancellation_time_limit} hours) has passed.")
 
             order.status = "Cancelled"
 

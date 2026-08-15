@@ -1,13 +1,18 @@
 import logging
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import select, func, and_, distinct, text, inspect
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_role
 from app.models.user import User
+from app.models.order import Order, OrderItem
+from app.models.product import Product
 from app.schemas.admin import (
     AdminOrderListResponse,
     AuditLogEntry,
@@ -112,6 +117,27 @@ async def update_admin_profile(
     await db.commit()
     await db.refresh(current_user)
     return AdminProfileResponse.model_validate(current_user)
+
+
+from app.schemas.user import AvatarUploadResponse
+from app.services.customer_service import CustomerService
+
+@router.post("/profile/avatar", response_model=AvatarUploadResponse, summary="Upload authenticated admin profile avatar")
+async def upload_admin_avatar(
+    avatar: UploadFile = File(...),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    allowed_mimes = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
+    filename = avatar.filename or ""
+    ext = filename.split(".")[-1].lower() if "." in filename else ""
+    if (avatar.content_type and avatar.content_type.lower() not in allowed_mimes) and ext not in ["jpg", "jpeg", "png", "webp"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid image format. Only JPG, JPEG, PNG, and WebP formats are allowed.",
+        )
+    service = CustomerService(db)
+    return await service.upload_avatar(current_user.id, avatar)
 
 
 # ======================================================

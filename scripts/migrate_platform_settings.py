@@ -54,7 +54,6 @@ CREATE TABLE IF NOT EXISTS platform_settings (
     admin_session_timeout           INTEGER       NOT NULL DEFAULT 60,
     max_login_attempts              INTEGER       NOT NULL DEFAULT 5,
     account_lockout_duration        INTEGER       NOT NULL DEFAULT 30,
-    require_admin_password_change   BOOLEAN       NOT NULL DEFAULT FALSE,
 
     -- Audit
     created_at                      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
@@ -73,7 +72,7 @@ INSERT INTO platform_settings (
     customer_registration_enabled, guest_checkout_enabled,
     minimum_order_value, order_cancellation_enabled, cancellation_time_limit,
     return_refund_enabled, maintenance_mode, admin_session_timeout,
-    max_login_attempts, account_lockout_duration, require_admin_password_change
+    max_login_attempts, account_lockout_duration
 ) VALUES (
     'singleton', 'Chovique Luxury Chocolates', 'support@chovique.com', '+91 98765 43210',
     '', '', '', 'India', '',
@@ -83,7 +82,7 @@ INSERT INTO platform_settings (
     TRUE, TRUE,
     100.0, TRUE, 24,
     TRUE, FALSE, 60,
-    5, 30, FALSE
+    5, 30
 ) ON CONFLICT (id) DO NOTHING;
 """
 

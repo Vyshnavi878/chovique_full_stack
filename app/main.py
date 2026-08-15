@@ -164,6 +164,23 @@ if settings.ALLOWED_ORIGINS:
 
 
 
+@app.middleware("http")
+async def maintenance_mode_middleware(request: Request, call_next):
+    path = request.url.path
+    if request.method != "OPTIONS" and not path.startswith("/api/v1/superadmin") and not path.startswith("/api/v1/admin") and not path.startswith("/api/v1/auth") and not path.startswith("/docs") and not path.startswith("/openapi"):
+        try:
+            async with AsyncSessionLocal() as db:
+                from app.repositories.platform_settings_repository import PlatformSettingsRepository
+                ps = await PlatformSettingsRepository(db).get()
+                if ps and ps.maintenance_mode:
+                    return JSONResponse(
+                        status_code=503,
+                        content={"detail": "Storefront is currently undergoing scheduled maintenance. Please check back soon."},
+                    )
+        except Exception:
+            pass
+    return await call_next(request)
+
 app.include_router(api_router)
 
 
