@@ -16,8 +16,18 @@ class OTPService:
 
     REGISTER_PREFIX = "otp:register:"
     FORGOT_PREFIX = "otp:forgot:"
+    UPDATE_PASSWORD_PREFIX = "otp:update_password:"
+    VERIFIED_PREFIX = "otp:verified:"
     ATTEMPT_PREFIX = "otp:attempt:"
     RESEND_PREFIX = "otp:resend:"
+
+    @staticmethod
+    def _get_prefix(purpose: str) -> str:
+        if purpose == "register":
+            return OTPService.REGISTER_PREFIX
+        if purpose == "update_password":
+            return OTPService.UPDATE_PASSWORD_PREFIX
+        return OTPService.FORGOT_PREFIX
 
     # ======================================================
     # Generate OTP
@@ -38,11 +48,7 @@ class OTPService:
         purpose: str,
     ) -> None:
 
-        prefix = (
-            OTPService.REGISTER_PREFIX
-            if purpose == "register"
-            else OTPService.FORGOT_PREFIX
-        )
+        prefix = OTPService._get_prefix(purpose)
 
         # Save new OTP with expiry
         await redis_client.setex(
@@ -72,11 +78,7 @@ class OTPService:
         purpose: str,
     ):
 
-        prefix = (
-            OTPService.REGISTER_PREFIX
-            if purpose == "register"
-            else OTPService.FORGOT_PREFIX
-        )
+        prefix = OTPService._get_prefix(purpose)
 
         return await redis_client.get(f"{prefix}{email}")
 
@@ -185,13 +187,31 @@ class OTPService:
         purpose: str,
     ) -> None:
 
-        prefix = (
-            OTPService.REGISTER_PREFIX
-            if purpose == "register"
-            else OTPService.FORGOT_PREFIX
-        )
+        prefix = OTPService._get_prefix(purpose)
 
         await redis_client.delete(f"{prefix}{email}")
+
+    # ======================================================
+    # Verified State
+    # ======================================================
+
+    @staticmethod
+    async def mark_otp_verified(email: str, purpose: str) -> None:
+        # Keep the verified state for 10 minutes
+        await redis_client.setex(
+            f"{OTPService.VERIFIED_PREFIX}{purpose}:{email}",
+            600,
+            "1"
+        )
+
+    @staticmethod
+    async def is_otp_verified(email: str, purpose: str) -> bool:
+        key = f"{OTPService.VERIFIED_PREFIX}{purpose}:{email}"
+        val = await redis_client.get(key)
+        if val:
+            await redis_client.delete(key)
+            return True
+        return False
 
     # ======================================================
     # OTP Attempts
@@ -235,10 +255,6 @@ class OTPService:
 
         await redis_client.delete(key)
 
-    REGISTER_PREFIX = "otp:register:"
-    FORGOT_PREFIX = "otp:forgot:"
-    ATTEMPT_PREFIX = "otp:attempt:"
-    RESEND_PREFIX = "otp:resend:"
     RESEND_COUNT_PREFIX = "otp:resend_count:"
     RESEND_LOCK_PREFIX = "otp:resend_lock:"
 

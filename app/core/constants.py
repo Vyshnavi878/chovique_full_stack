@@ -24,3 +24,4 @@ USER_ROLES = ("customer", "admin", "superadmin")
 
 OTP_PURPOSE_REGISTER = "register"
 OTP_PURPOSE_FORGOT = "forgot"
+OTP_PURPOSE_UPDATE_PASSWORD = "update_password"

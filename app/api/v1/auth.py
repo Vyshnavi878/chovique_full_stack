@@ -21,6 +21,9 @@ from app.schemas.auth import (
     ResetPasswordRequest,
     ChangePasswordRequest,
     ResendForgotOTPRequest,
+    UpdatePasswordSendOTPRequest,
+    UpdatePasswordVerifyOTPRequest,
+    UpdatePasswordRequest,
     OTPSentResponse,
     AuthUserResponse,
 )
@@ -486,6 +489,69 @@ async def logout(
             "message":
             "Logout successful."
         }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+# ======================================================
+# UPDATE PASSWORD WITH OTP (AUTHENTICATED)
+# ======================================================
+
+@router.post("/update-password/send-otp", response_model=MessageResponse)
+async def send_update_password_otp(
+    request: UpdatePasswordSendOTPRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = AuthService(db)
+        return await service.send_update_password_otp(
+            user_id=user_id,
+            email=request.email,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+@router.post("/update-password/verify-otp", response_model=MessageResponse)
+async def verify_update_password_otp(
+    request: UpdatePasswordVerifyOTPRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = AuthService(db)
+        return await service.verify_update_password_otp(
+            user_id=user_id,
+            email=request.email,
+            otp=request.otp,
+        )
+    except (InvalidOTPError, OTPExpiredError, MaxAttemptsExceededError) as e:
+        _handle_otp_exception(e)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+@router.post("/update-password", response_model=MessageResponse)
+async def update_password(
+    request: UpdatePasswordRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        service = AuthService(db)
+        return await service.update_password_with_otp(
+            user_id=user_id,
+            email=request.email,
+            new_password=request.new_password,
+            confirm_password=request.confirm_password,
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

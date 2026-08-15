@@ -830,8 +830,61 @@ class AuthService:
 
         }
 
+    # ======================================================
+    # UPDATE PASSWORD WITH OTP
+    # ======================================================
 
+    async def send_update_password_otp(self, user_id: str, email: str):
+        user = await self.user_repo.get_by_id(user_id)
+        if not user or user.email != email:
+            raise ValueError("Email does not match the authenticated user.")
 
+        otp = self.otp_service.generate_otp()
+        await self.otp_service.save_otp(
+            email=email,
+            otp=otp,
+            purpose="update_password",
+        )
+        await self.mail_service.send_update_password_otp(
+            email=email,
+            otp=otp,
+            name=user.full_name,
+        )
+        return {"message": "OTP sent successfully."}
+
+    async def verify_update_password_otp(self, user_id: str, email: str, otp: str):
+        user = await self.user_repo.get_by_id(user_id)
+        if not user or user.email != email:
+            raise ValueError("Email does not match the authenticated user.")
+
+        await self.otp_service.verify_otp(
+            email=email,
+            otp=otp,
+            purpose="update_password",
+        )
+        await self.otp_service.mark_otp_verified(email, "update_password")
+        return {"message": "OTP verified successfully."}
+
+    async def update_password_with_otp(
+        self, user_id: str, email: str, new_password: str, confirm_password: str
+    ):
+        user = await self.user_repo.get_by_id(user_id)
+        if not user or user.email != email:
+            raise ValueError("Email does not match the authenticated user.")
+
+        if new_password != confirm_password:
+            raise ValueError("Passwords do not match.")
+
+        if not await self.otp_service.is_otp_verified(email, "update_password"):
+            raise ValueError("OTP verification is required before updating password.")
+
+        await self.user_repo.update_password(
+            user.id,
+            hash_password(new_password)
+        )
+        await self.refresh_repo.revoke_all_user_tokens(user.id)
+
+        return {"message": "Password updated successfully."}
 
     # ======================================================
     # REFRESH TOKEN

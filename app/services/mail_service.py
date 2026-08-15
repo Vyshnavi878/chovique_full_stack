@@ -154,3 +154,39 @@ class MailService:
                 print(f"==========================================\n")
             else:
                 raise e
+
+    @staticmethod
+    async def send_update_password_otp(
+        email: str,
+        otp: str,
+        name: str = "",
+    ) -> None:
+        """Send OTP for authenticated password update."""
+        display_name = name.strip() or email.split("@")[0]
+        subject = "Update Your Password"
+        body_text = "Your OTP to update your password is:"
+
+        html = _build_otp_html(
+            name=display_name,
+            otp=otp,
+            heading="Update Password OTP",
+            body_text=body_text,
+            footer_note="If you did not request a password update, please secure your account.",
+        )
+        message = MessageSchema(
+            subject=subject,
+            recipients=[email],
+            body=html,
+            subtype=MessageType.html,
+        )
+        fm = FastMail(conf)
+        try:
+            await fm.send_message(message)
+        except Exception as e:
+            logger.error(f"Failed to send Update Password OTP email to {email}: {e}")
+            if settings.DEBUG:
+                print(f"\n==========================================")
+                print(f"[DEV MODE - MAIL FAILED] Update Password OTP for {email}: {otp}")
+                print(f"==========================================\n")
+            else:
+                raise e

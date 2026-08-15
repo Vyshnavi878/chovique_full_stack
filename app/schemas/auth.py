@@ -157,6 +157,32 @@ class ResendOTPRequest(BaseModel):
 class ResendForgotOTPRequest(BaseModel):
     email: EmailStr
 
+# ==========================================================
+# Update Password (Authenticated OTP Flow)
+# ==========================================================
+
+class UpdatePasswordSendOTPRequest(BaseModel):
+    email: EmailStr
+
+class UpdatePasswordVerifyOTPRequest(BaseModel):
+    email: EmailStr
+    otp: str
+
+    @field_validator("otp")
+    @classmethod
+    def validate_otp(cls, v: str) -> str:
+        return validate_otp_format(v)
+
+class UpdatePasswordRequest(BaseModel):
+    email: EmailStr
+    new_password: str = Field(..., min_length=8)
+    confirm_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        return validate_password_strength(v)
+
 
 # ==========================================================
 # Reset Password
