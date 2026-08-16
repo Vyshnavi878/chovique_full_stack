@@ -49,7 +49,3 @@ class CalculateRedemptionResponse(BaseModel):
     message: str
 
 
-class AdminCoinAdjustmentPayload(BaseModel):
-    user_id: str
-    coins: int
-    reason: str

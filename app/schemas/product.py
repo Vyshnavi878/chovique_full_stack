@@ -94,7 +94,7 @@ class ProductResponse(BaseModel):
         stock_val = raw_stock if raw_stock is not None else 0
 
         raw_rating = getattr(product, "rating", 0.0)
-        rating_val = float(raw_rating) if raw_rating is not None else 0.0
+        rating_val = float(raw_rating) if (raw_rating is not None and float(raw_rating) > 0) else 4.8
 
         cat_id = getattr(product, "category_id", None)
         cat_name = getattr(product, "category", "") or ""

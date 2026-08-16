@@ -1337,10 +1337,19 @@ class AdminService:
             discount=float(getattr(sale, 'discount', None) or 0.0),
             tax=float(getattr(sale, 'tax', None) or 0.0),
             total_amount=tot_amt,
-            status=getattr(sale, 'status', None) or "Completed",
+            status=getattr(sale, 'payment_status', None) or getattr(sale, 'status', None) or "Paid",
             date=sale.created_at.strftime("%Y-%m-%d") if sale.created_at else datetime.now().strftime("%Y-%m-%d"),
             created_at=sale.created_at.strftime("%Y-%m-%d %H:%M:%S") if sale.created_at else "",
             items=items_res,
+            payment_status=getattr(sale, 'payment_status', None) or getattr(sale, 'status', None) or "Paid",
+            received_amount=getattr(sale, 'received_amount', None),
+            receipt_number=getattr(sale, 'receipt_number', None),
+            card_type=getattr(sale, 'card_type', None),
+            card_last4=getattr(sale, 'card_last4', None),
+            transaction_id=getattr(sale, 'transaction_id', None),
+            upi_id=getattr(sale, 'upi_id', None),
+            bank_name=getattr(sale, 'bank_name', None),
+            account_holder=getattr(sale, 'account_holder', None),
             # Backward compatibility fields for legacy frontend callers
             productName=p_name,
             quantity=qty,
@@ -1379,6 +1388,57 @@ class AdminService:
             # Phone format validation
             if not re.match(r"^(\+91[\-\s]?)?[0]?[6-9]\d{9}$|^\+?[0-9\s\-()]{7,15}$", payload.phone.strip()):
                 raise ValueError("Please provide a valid phone number.")
+
+            # 1b. Payment-method-specific validation & field extraction
+            method = (payload.payment_method or "Cash").strip()
+            if method not in ["Cash", "Card", "UPI", "Bank Transfer"]:
+                raise ValueError(f"Invalid payment method '{method}'. Supported methods: Cash, Card, UPI, Bank Transfer.")
+
+            p_status = (payload.payment_status or "Paid").strip()
+            if p_status not in ["Paid", "Pending"]:
+                p_status = "Paid"
+
+            rec_amt = None
+            rec_num = None
+            c_type = None
+            c_last4 = None
+            txn_id = None
+            u_id = None
+            b_name = None
+            acc_holder = None
+
+            if method == "Cash":
+                if payload.received_amount is None or float(payload.received_amount) <= 0:
+                    raise ValueError("Received Amount (₹) is required and must be greater than 0 for Cash payments.")
+                rec_amt = float(payload.received_amount)
+                rec_num = payload.receipt_number.strip() if payload.receipt_number else None
+            elif method == "Card":
+                if not payload.card_type or not payload.card_type.strip():
+                    raise ValueError("Card Type (Credit Card / Debit Card) is required.")
+                if not payload.card_last4 or not re.match(r"^\d{4}$", str(payload.card_last4).strip()):
+                    raise ValueError("Last 4 Digits are required and must be exactly 4 digits for Card payments.")
+                if not payload.transaction_id or not payload.transaction_id.strip():
+                    raise ValueError("Transaction ID is required for Card payments.")
+                c_type = payload.card_type.strip()
+                c_last4 = str(payload.card_last4).strip()
+                txn_id = payload.transaction_id.strip()
+            elif method == "UPI":
+                if not payload.upi_id or not payload.upi_id.strip():
+                    raise ValueError("UPI ID is required for UPI payments.")
+                if not payload.transaction_id or not payload.transaction_id.strip():
+                    raise ValueError("Transaction ID / UTR Number is required for UPI payments.")
+                u_id = payload.upi_id.strip()
+                txn_id = payload.transaction_id.strip()
+            elif method == "Bank Transfer":
+                if not payload.bank_name or not payload.bank_name.strip():
+                    raise ValueError("Bank Name is required for Bank Transfer.")
+                if not payload.account_holder or not payload.account_holder.strip():
+                    raise ValueError("Account Holder Name is required for Bank Transfer.")
+                if not payload.transaction_id or not payload.transaction_id.strip():
+                    raise ValueError("UTR / Transaction ID is required for Bank Transfer.")
+                b_name = payload.bank_name.strip()
+                acc_holder = payload.account_holder.strip()
+                txn_id = payload.transaction_id.strip()
 
             # 2. Database transaction & stock deduction
             subtotal = 0.0
@@ -1431,12 +1491,21 @@ class AdminService:
                 phone=payload.phone.strip(),
                 email=payload.email.strip() if payload.email else None,
                 address=payload.address.strip(),
-                payment_method=payload.payment_method.strip(),
+                payment_method=method,
                 subtotal=subtotal,
                 discount=discount,
                 tax=tax,
                 total_amount=total_amount,
-                status="Completed",
+                status=p_status,
+                payment_status=p_status,
+                received_amount=rec_amt,
+                receipt_number=rec_num,
+                card_type=c_type,
+                card_last4=c_last4,
+                transaction_id=txn_id,
+                upi_id=u_id,
+                bank_name=b_name,
+                account_holder=acc_holder,
                 # Legacy fields for backward compatibility
                 product_name=sale_items[0]["product_name"] if sale_items else "Offline Sale",
                 quantity=sum(it["quantity"] for it in sale_items),

@@ -196,29 +196,4 @@ class WalletService:
                 commit=commit,
             )
 
-    async def admin_manual_adjustment(
-        self,
-        user_id: str,
-        coins: int,
-        reason: str,
-    ) -> CoinTransactionResponse:
-        tx = await self.wallet_repo.add_transaction(
-            user_id=user_id,
-            transaction_type="ADJUSTMENT",
-            coins=coins,
-            description=f"Admin Adjustment: {reason}",
-            commit=True,
-        )
-        try:
-            from app.models.user import User
-            from app.services.notification_service import NotificationService
-            u_res = await self.db.execute(select(User).where(User.id == user_id))
-            u = u_res.scalar_one_or_none()
-            u_name = u.full_name if u else "Customer"
-            await NotificationService(self.db).notify_reward_adjustment(user_id, u_name, coins, reason)
-        except Exception:
-            pass
-        return CoinTransactionResponse.model_validate(tx)
 
-    async def get_recent_admin_adjustments(self, limit: int = 50) -> list:
-        return await self.wallet_repo.get_recent_all_transactions(limit=limit)

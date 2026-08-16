@@ -29,6 +29,17 @@ class OfflineSale(Base):
     total_amount = Column(Float, nullable=False, default=0.0)
     status = Column(String(50), nullable=False, default="Completed")
 
+    # Payment-Method-Specific Details
+    payment_status = Column(String(50), nullable=False, default="Paid")
+    received_amount = Column(Float, nullable=True)
+    receipt_number = Column(String(100), nullable=True)
+    card_type = Column(String(50), nullable=True)
+    card_last4 = Column(String(4), nullable=True)
+    transaction_id = Column(String(100), nullable=True)
+    upi_id = Column(String(100), nullable=True)
+    bank_name = Column(String(100), nullable=True)
+    account_holder = Column(String(255), nullable=True)
+
     # Backward compatibility fields (for older superadmin revenue queries)
     product_name = Column(String(255), nullable=True)
     quantity = Column(Integer, nullable=True, default=1)

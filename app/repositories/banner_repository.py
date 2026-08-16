@@ -18,7 +18,7 @@ class BannerRepository:
         result = await self.db.execute(
             select(Banner)
             .where(Banner.is_active.is_(True))
-            .order_by(Banner.sort_order.asc())
+            .order_by(Banner.sort_order.asc(), Banner.created_at.asc(), Banner.id.asc())
         )
 
         return list(result.scalars().all())

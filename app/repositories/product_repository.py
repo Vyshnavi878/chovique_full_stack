@@ -21,6 +21,7 @@ class ProductRepository:
         *,
         search: str | None = None,
         category: str | None = None,
+        availability: str | None = None,
         price_min: float | None = None,
         price_max: float | None = None,
         min_rating: float | None = None,
@@ -38,6 +39,7 @@ class ProductRepository:
             query = query.where(
                 or_(
                     Product.name.ilike(term),
+                    Product.sku.ilike(term),
                     Product.description.ilike(term),
                     Product.ingredients.ilike(term),
                     Product.badge.ilike(term),
@@ -55,6 +57,12 @@ class ProductRepository:
                 )
             )
 
+        if availability and availability != "all":
+            if availability in ("in_stock", "instock"):
+                query = query.where(Product.is_available.is_(True), Product.stock > 0)
+            elif availability in ("out_of_stock", "stock_out", "outofstock"):
+                query = query.where(or_(Product.is_available.is_(False), Product.stock <= 0))
+
         if price_min is not None:
             query = query.where(Product.price >= price_min)
 
@@ -68,15 +76,17 @@ class ProductRepository:
             query = query.where(
                 or_(
                     Product.is_new_arrival.is_(True),
-                    Product.badge.in_(["New", "Limited"]),
-                )
+                    Product.badge == "New",
+                ),
+                or_(Product.badge.is_(None), Product.badge.notin_(["Limited", "Limited Edition"])),
             )
         elif sort == "bestseller":
             query = query.where(
                 or_(
                     Product.is_bestseller.is_(True),
                     Product.badge.in_(["Bestseller", "Premium"]),
-                )
+                ),
+                or_(Product.badge.is_(None), Product.badge.notin_(["Limited", "Limited Edition"])),
             )
 
         # --- Count (before pagination) ---
@@ -170,6 +180,7 @@ class ProductRepository:
                     Product.badge.in_(["Bestseller", "Premium"]),
                     Product.is_bestseller.is_(True),
                 ),
+                or_(Product.badge.is_(None), Product.badge.notin_(["Limited", "Limited Edition"])),
             )
             .order_by(Product.rating.desc())
             .limit(limit)
@@ -188,9 +199,10 @@ class ProductRepository:
             .where(
                 Product.is_active.is_(True),
                 or_(
-                    Product.badge.in_(["New", "Limited"]),
+                    Product.badge == "New",
                     Product.is_new_arrival.is_(True),
                 ),
+                or_(Product.badge.is_(None), Product.badge.notin_(["Limited", "Limited Edition"])),
             )
             .order_by(Product.created_at.desc())
             .limit(limit)

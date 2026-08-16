@@ -46,6 +46,7 @@ router = APIRouter(prefix="/products", tags=["Products"])
 async def list_products(
     search: Optional[str] = Query(default=None, description="Search by name or description"),
     category: Optional[str] = Query(default=None, description="Filter by category"),
+    availability: Optional[str] = Query(default=None, description="Filter by availability: in_stock, out_of_stock, all"),
     price_min: Optional[float] = Query(default=None, ge=0, description="Minimum price"),
     price_max: Optional[float] = Query(default=None, ge=0, description="Maximum price"),
     min_rating: Optional[float] = Query(default=None, ge=0, le=5, description="Minimum rating"),
@@ -58,26 +59,12 @@ async def list_products(
 
     clean_cat = None
     if category and category.lower().strip() != "all":
-        c = category.lower().strip()
-        valid_categories = ["dark", "milk", "white", "gift", "beverage"]
-        if c in valid_categories:
-            clean_cat = c
-        elif "milk" in c:
-            clean_cat = "milk"
-        elif "white" in c:
-            clean_cat = "white"
-        elif "gift" in c or "hamper" in c or "box" in c:
-            clean_cat = "gift"
-        elif "bev" in c:
-            clean_cat = "beverage"
-        elif "dark" in c:
-            clean_cat = "dark"
-        else:
-            clean_cat = c
+        clean_cat = category.strip()
 
     return await service.list_products(
         search=search,
         category=clean_cat,
+        availability=availability,
         price_min=price_min,
         price_max=price_max,
         min_rating=min_rating,
@@ -181,6 +168,7 @@ async def create_product(
     stock: Optional[int] = Form(default=10),
     ingredients: Optional[str] = Form(default=None),
     badge: Optional[str] = Form(default=None),
+    rating: Optional[float] = Form(default=None),
     sort_order: int = Form(default=0),
     # Nutrition fields
     nutrition_serving_size: Optional[str] = Form(default=None),
@@ -287,6 +275,7 @@ async def create_product(
         ingredients=ingredients,
         nutrition=nutrition,
         badge=clean_badge,
+        rating=rating if (rating is not None and rating > 0) else 4.8,
         image=image_url,
         hover_image=hover_image_url,
         sort_order=sort_order,

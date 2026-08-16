@@ -1,6 +1,6 @@
-from datetime import datetime
+from datetime import datetime, timezone, date
 from typing import Optional, Tuple, List
-from sqlalchemy import select, func, or_, and_, cast, String
+from sqlalchemy import select, func, or_, and_, cast, String, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -57,10 +57,26 @@ class ActivityLogService:
         search: Optional[str] = None,
     ) -> ActivityLogListResponse:
         query = select(AuditLog).outerjoin(User, AuditLog.user_id == User.id).options(selectinload(AuditLog.user))
+
+        # Strict DB-level exclusion of Super Admin / Enterprise Chief administrative records
+        # Admin Activity Logs must only show Admin and Customer activities
+        SUPERADMIN_ROLES = ["superadmin", "super_admin", "enterprise_chief", "enterprise chief", "enterprise-chief"]
+        SUPERADMIN_NAMES = ["enterprise chief", "superadmin", "super admin"]
+
         conditions = [
             and_(
-                or_(func.lower(cast(AuditLog.user_role, String)) != "superadmin", AuditLog.user_role == None),
-                or_(func.lower(cast(User.role, String)) != "superadmin", User.role == None),
+                or_(
+                    AuditLog.user_role == None,
+                    ~func.lower(cast(AuditLog.user_role, String)).in_(SUPERADMIN_ROLES),
+                ),
+                or_(
+                    AuditLog.user_id == None,
+                    User.id == None,
+                    and_(
+                        ~func.lower(cast(User.role, String)).in_(SUPERADMIN_ROLES),
+                        ~func.lower(cast(User.full_name, String)).in_(SUPERADMIN_NAMES),
+                    ),
+                ),
             )
         ]
 
@@ -92,29 +108,27 @@ class ActivityLogService:
         if status and status.strip() and status.lower() != "all":
             conditions.append(func.lower(cast(AuditLog.status, String)) == status.lower().strip())
 
+        # Start Date filter (Inclusive from 00:00:00 of start_date)
         if start_date and start_date.strip():
             try:
                 raw_start = start_date.strip()
-                if len(raw_start) == 10:
-                    dt_start = datetime.strptime(raw_start, "%Y-%m-%d")
+                if "T" in raw_start:
+                    d_start = datetime.fromisoformat(raw_start.replace("Z", "+00:00")).date()
                 else:
-                    dt_start = datetime.fromisoformat(raw_start)
-                conditions.append(AuditLog.created_at >= dt_start)
+                    d_start = datetime.strptime(raw_start[:10], "%Y-%m-%d").date()
+                conditions.append(cast(AuditLog.created_at, Date) >= d_start)
             except Exception:
                 pass
 
+        # End Date filter (Inclusive through 23:59:59 of end_date)
         if end_date and end_date.strip():
             try:
                 raw_end = end_date.strip()
-                if len(raw_end) == 10:
-                    dt_end = datetime.strptime(raw_end, "%Y-%m-%d").replace(
-                        hour=23, minute=59, second=59, microsecond=999999
-                    )
+                if "T" in raw_end:
+                    d_end = datetime.fromisoformat(raw_end.replace("Z", "+00:00")).date()
                 else:
-                    dt_end = datetime.fromisoformat(raw_end)
-                    if dt_end.hour == 0 and dt_end.minute == 0 and dt_end.second == 0:
-                        dt_end = dt_end.replace(hour=23, minute=59, second=59, microsecond=999999)
-                conditions.append(AuditLog.created_at <= dt_end)
+                    d_end = datetime.strptime(raw_end[:10], "%Y-%m-%d").date()
+                conditions.append(cast(AuditLog.created_at, Date) <= d_end)
             except Exception:
                 pass
 

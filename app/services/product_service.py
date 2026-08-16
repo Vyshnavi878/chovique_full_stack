@@ -37,6 +37,7 @@ class ProductService:
         *,
         search: str | None = None,
         category: str | None = None,
+        availability: str | None = None,
         price_min: float | None = None,
         price_max: float | None = None,
         min_rating: float | None = None,
@@ -48,6 +49,7 @@ class ProductService:
         result = await self.product_repo.get_all(
             search=search,
             category=category,
+            availability=availability,
             price_min=price_min,
             price_max=price_max,
             min_rating=min_rating,

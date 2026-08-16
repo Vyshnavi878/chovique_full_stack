@@ -51,7 +51,7 @@ from app.services.pdf_report_service import PdfReportService
 from app.services.csv_report_service import CsvReportService
 from app.schemas.category import AdminCategoryResponse, CategoryUpdate
 from app.services.admin_service import AdminService
-from app.schemas.wallet import RewardSettingsSchema, CoinTransactionResponse, AdminCoinAdjustmentPayload
+from app.schemas.wallet import RewardSettingsSchema, CoinTransactionResponse
 from app.services.wallet_service import WalletService
 from app.models.audit_log import AuditLog
 from app.schemas.admin_profile import AdminProfileResponse, AdminProfileUpdateRequest
@@ -936,29 +936,6 @@ async def update_reward_settings(
     service = WalletService(db)
     return await service.update_reward_settings(payload)
 
-
-@router.post("/rewards/adjust", response_model=CoinTransactionResponse, summary="Perform manual admin coin adjustment")
-async def admin_coin_adjustment(
-    payload: AdminCoinAdjustmentPayload,
-    current_user: User = Depends(require_role("admin", "superadmin")),
-    db: AsyncSession = Depends(get_db),
-):
-    service = WalletService(db)
-    return await service.admin_manual_adjustment(
-        user_id=payload.user_id,
-        coins=payload.coins,
-        reason=payload.reason,
-    )
-
-
-@router.get("/rewards/history", summary="Get recent reward coin transactions (admin only)")
-async def get_reward_history(
-    limit: int = 50,
-    current_user: User = Depends(require_role("admin", "superadmin")),
-    db: AsyncSession = Depends(get_db),
-):
-    service = WalletService(db)
-    return await service.get_recent_admin_adjustments(limit=limit)
 
 
 # ======================================================

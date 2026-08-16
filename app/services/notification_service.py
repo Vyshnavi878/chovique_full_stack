@@ -181,22 +181,4 @@ class NotificationService:
         except Exception as e:
             logger.error("Failed to create support_message notification: %s", e)
 
-    async def notify_reward_adjustment(self, user_id: str, user_name: str, coin_change: int, reason: str = "", commit: bool = True):
-        """Notification type: reward_adjustment"""
-        try:
-            sign = "+" if coin_change > 0 else ""
-            title = "Reward Coin Adjustment"
-            message = f"{user_name}'s balance adjusted by {sign}{coin_change} coins."
-            if reason:
-                message += f" Reason: {reason}"
-            await self.repo.create_admin_notification_if_not_exists(
-                admin_id=None,
-                type="reward_adjustment",
-                title=title,
-                message=message,
-                related_entity_type="customer",
-                related_entity_id=user_id,
-                commit=commit
-            )
-        except Exception as e:
-            logger.error("Failed to create reward_adjustment notification: %s", e)
+

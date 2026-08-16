@@ -261,6 +261,17 @@ class OfflineSalePayload(BaseModel):
     discount: float = 0.0
     tax: float = 0.0
 
+    # Payment-Method-Specific Details
+    payment_status: Optional[str] = "Paid"
+    received_amount: Optional[float] = None
+    receipt_number: Optional[str] = None
+    card_type: Optional[str] = None
+    card_last4: Optional[str] = None
+    transaction_id: Optional[str] = None
+    upi_id: Optional[str] = None
+    bank_name: Optional[str] = None
+    account_holder: Optional[str] = None
+
     # Multi-product items
     items: Optional[list[OfflineSaleItemPayload]] = None
 
@@ -297,6 +308,17 @@ class OfflineSaleResponse(BaseModel):
     date: str
     created_at: str
     items: list[OfflineSaleItemResponse] = []
+
+    # Payment-Method-Specific Response Details
+    payment_status: Optional[str] = "Paid"
+    received_amount: Optional[float] = None
+    receipt_number: Optional[str] = None
+    card_type: Optional[str] = None
+    card_last4: Optional[str] = None
+    transaction_id: Optional[str] = None
+    upi_id: Optional[str] = None
+    bank_name: Optional[str] = None
+    account_holder: Optional[str] = None
 
     # Backward compatibility fields for legacy frontend callers
     productName: str
