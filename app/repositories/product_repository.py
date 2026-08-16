@@ -48,12 +48,14 @@ class ProductRepository:
 
         if category and category != "all":
             from app.models.category import Category
+            cat_term = category.strip()
             query = query.join(Product.category_rel, isouter=True).where(
                 or_(
-                    Product.category_id == category,
-                    Category.id == category,
-                    Category.slug == category,
-                    Category.name.ilike(f"%{category}%")
+                    Product.category_id == cat_term,
+                    Category.id == cat_term,
+                    Category.slug == cat_term,
+                    Category.slug.ilike(f"%{cat_term}%"),
+                    Category.name.ilike(f"%{cat_term}%"),
                 )
             )
 
@@ -64,29 +66,27 @@ class ProductRepository:
                 query = query.where(or_(Product.is_available.is_(False), Product.stock <= 0))
 
         if price_min is not None:
-            query = query.where(Product.price >= price_min)
+            query = query.where(Product.price >= float(price_min))
 
         if price_max is not None:
-            query = query.where(Product.price <= price_max)
+            query = query.where(Product.price <= float(price_max))
 
         if min_rating is not None:
-            query = query.where(Product.rating >= min_rating)
+            query = query.where(Product.rating >= float(min_rating))
 
-        if sort in ("newest", "new"):
-            query = query.where(
-                or_(
-                    Product.is_new_arrival.is_(True),
-                    Product.badge == "New",
-                ),
-                or_(Product.badge.is_(None), Product.badge.notin_(["Limited", "Limited Edition"])),
-            )
-        elif sort == "bestseller":
+        if sort in ("popularity", "bestseller"):
             query = query.where(
                 or_(
                     Product.is_bestseller.is_(True),
-                    Product.badge.in_(["Bestseller", "Premium"]),
-                ),
-                or_(Product.badge.is_(None), Product.badge.notin_(["Limited", "Limited Edition"])),
+                    Product.badge.in_(["Bestseller", "Premium", "Popular"]),
+                )
+            )
+        elif sort in ("newest", "new"):
+            query = query.where(
+                or_(
+                    Product.is_new_arrival.is_(True),
+                    Product.badge.in_(["New", "New Arrival"]),
+                )
             )
 
         # --- Count (before pagination) ---
@@ -98,16 +98,22 @@ class ProductRepository:
         # --- Sort ---
 
         sort_map = {
+            "featured": (Product.is_featured.desc(), Product.sort_order.asc(), Product.id.asc()),
+            "popularity": (Product.is_bestseller.desc(), Product.ratings_count.desc(), Product.sort_order.asc()),
+            "bestseller": (Product.is_bestseller.desc(), Product.ratings_count.desc(), Product.sort_order.asc()),
             "price_asc": Product.price.asc(),
             "price_desc": Product.price.desc(),
-            "rating": Product.rating.desc(),
+            "rating": (Product.rating.desc(), Product.ratings_count.desc()),
             "newest": Product.created_at.desc(),
             "name_asc": Product.name.asc(),
             "name_desc": Product.name.desc(),
         }
 
-        order = sort_map.get(sort, Product.sort_order.asc())
-        query = query.order_by(order)
+        order = sort_map.get(sort, (Product.is_featured.desc(), Product.sort_order.asc(), Product.id.asc()))
+        if isinstance(order, tuple):
+            query = query.order_by(*order)
+        else:
+            query = query.order_by(order)
 
         # --- Pagination ---
 
