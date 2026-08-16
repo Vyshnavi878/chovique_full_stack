@@ -9,18 +9,18 @@ from pydantic import BaseModel, ConfigDict, Field
 # ==========================================================
 
 class NutritionInfo(BaseModel):
-    servingSize: Optional[str] = ""
-    calories: Optional[str] = ""
-    totalFat: Optional[str] = ""
-    saturatedFat: Optional[str] = ""
-    transFat: Optional[str] = ""
-    cholesterol: Optional[str] = ""
-    sodium: Optional[str] = ""
-    totalCarb: Optional[str] = ""
-    dietaryFiber: Optional[str] = ""
-    totalSugars: Optional[str] = ""
-    addedSugars: Optional[str] = ""
-    protein: Optional[str] = ""
+    servingSize: str = ""
+    calories: str = ""
+    totalFat: str = ""
+    saturatedFat: str = ""
+    transFat: str = ""
+    cholesterol: str = ""
+    sodium: str = ""
+    totalCarb: str = ""
+    dietaryFiber: str = ""
+    totalSugars: str = ""
+    addedSugars: str = ""
+    protein: str = ""
 
 
 # ==========================================================
@@ -53,7 +53,6 @@ class ProductResponse(BaseModel):
     stock: int = 0
     description: Optional[str] = None
     ingredients: Optional[str] = None
-    nutrition: Optional[NutritionInfo] = None
     badge: Optional[str] = None
     image: Optional[str] = None
     hoverImage: Optional[str] = None
@@ -71,11 +70,6 @@ class ProductResponse(BaseModel):
     @classmethod
     def from_orm_model(cls, product) -> "ProductResponse":
         """Convert an ORM Product to a frontend-compatible response."""
-
-        nutrition = None
-        if product.nutrition:
-            nutrition = NutritionInfo(**product.nutrition)
-
         reviews = []
         if "reviews_list" in product.__dict__ and product.__dict__["reviews_list"]:
             reviews = [
@@ -112,7 +106,6 @@ class ProductResponse(BaseModel):
             stock=stock_val,
             description=product.description,
             ingredients=product.ingredients,
-            nutrition=nutrition,
             badge=product.badge,
             image=product.image,
             hoverImage=product.hover_image,
@@ -142,7 +135,6 @@ class ProductCreate(BaseModel):
     stock: int = 100
     description: Optional[str] = None
     ingredients: Optional[str] = None
-    nutrition: Optional[NutritionInfo] = None
     badge: Optional[str] = None
     image: Optional[str] = None
     hover_image: Optional[str] = None
@@ -171,7 +163,6 @@ class ProductUpdate(BaseModel):
     stock: Optional[int] = None
     description: Optional[str] = None
     ingredients: Optional[str] = None
-    nutrition: Optional[NutritionInfo] = None
     badge: Optional[str] = None
     image: Optional[str] = None
     hover_image: Optional[str] = None

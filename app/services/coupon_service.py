@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from app.models.coupon import Coupon, CouponUsage, CouponEligibilityRule
+from app.models.coupon import Coupon, CouponUsage, CouponEligibilityRule, CouponCategory, CouponProduct
 from app.models.order import Order
 from app.repositories.coupon_repository import CouponRepository
 from app.repositories.cart_repository import CartRepository
@@ -28,6 +28,10 @@ class CouponService:
             # 1. Active status check
             is_active_flag = getattr(c, "is_active", True)
             if not is_active_flag:
+                continue
+
+            # 1.5 Exclude Influencer coupons from list
+            if getattr(c, "coupon_type", "CUSTOMER") == "INFLUENCER":
                 continue
 
             # 2. Start date check
@@ -153,20 +157,51 @@ class CouponService:
         # Get Cart to calculate discount
         cart = await self.cart_repo.get_or_create_user_cart(user_id)
         
-        # Calculate subtotal
-        subtotal = sum(item.product.price * item.quantity for item in cart.items)
+        # Check Product/Category Restrictions
+        coupon_categories_q = select(CouponCategory.category_id).where(CouponCategory.coupon_id == coupon.id)
+        coupon_categories = (await self.db.scalars(coupon_categories_q)).all()
+        allowed_category_ids = set(coupon_categories)
         
-        if coupon.minimum_order_amount > 0 and subtotal < coupon.minimum_order_amount:
-            return CouponValidationResponse(valid=False, code=code, message=f"Minimum order amount of ₹{coupon.minimum_order_amount} required.")
+        coupon_products_q = select(CouponProduct.product_id).where(CouponProduct.coupon_id == coupon.id)
+        coupon_products = (await self.db.scalars(coupon_products_q)).all()
+        allowed_product_ids = set(coupon_products)
+
+        # Calculate subtotal (eligible vs total)
+        total_subtotal = 0.0
+        eligible_subtotal = 0.0
+        
+        for item in cart.items:
+            item_price = item.product.price * item.quantity
+            total_subtotal += item_price
             
-        # Calculate Discount
+            is_eligible = True
+            if allowed_category_ids and item.product.category_id not in allowed_category_ids:
+                is_eligible = False
+            if allowed_product_ids and item.product_id not in allowed_product_ids:
+                is_eligible = False
+                
+            if is_eligible:
+                eligible_subtotal += item_price
+
+        if eligible_subtotal == 0.0:
+            if allowed_category_ids or allowed_product_ids:
+                return CouponValidationResponse(valid=False, code=code, message="This promo code does not apply to any items in your cart.")
+            else:
+                # If no restrictions but subtotal is 0 (empty cart)
+                if total_subtotal == 0:
+                    return CouponValidationResponse(valid=False, code=code, message="Your cart is empty.")
+
+        if coupon.minimum_order_amount > 0 and eligible_subtotal < coupon.minimum_order_amount:
+            return CouponValidationResponse(valid=False, code=code, message=f"Minimum eligible order amount of ₹{coupon.minimum_order_amount} required.")
+            
+        # Calculate Discount based on eligible_subtotal
         calculated = 0.0
         if coupon.discount_type == "PERCENTAGE":
-            calculated = (subtotal * coupon.discount_percent) / 100.0
+            calculated = (eligible_subtotal * coupon.discount_percent) / 100.0
             if coupon.maximum_discount_amount > 0:
                 calculated = min(calculated, coupon.maximum_discount_amount)
         elif coupon.discount_type == "FIXED_AMOUNT":
-            calculated = min(coupon.discount_amount, subtotal)
+            calculated = min(coupon.discount_amount, eligible_subtotal)
         elif coupon.discount_type == "FREE_SHIPPING":
             calculated = 99.0 # Assuming shipping is 99
             

@@ -19,6 +19,9 @@ DEFAULT_REWARD_SETTINGS = {
     "spend_per_coin": 10.0,
     "coins_per_rupee": 10.0,
     "max_redemption_percentage": 20.0,
+    "welcome_coins": 50,
+    "first_order_coins": 100,
+    "per_order_coins_fixed": 0,
 }
 
 
@@ -143,10 +146,29 @@ class WalletService:
         commit: bool = False,
     ):
         settings = await self.get_reward_settings()
-        if not settings.reward_system_enabled or settings.spend_per_coin <= 0:
+        if not settings.reward_system_enabled:
             return 0, None
 
-        coins_earned = math.floor(payable_amount / settings.spend_per_coin)
+        # Check if first order
+        from app.models.order import Order
+        from sqlalchemy import select, func
+        order_count = await self.db.scalar(
+            select(func.count(Order.id)).where(Order.user_id == user_id, Order.status != "CANCELLED")
+        )
+
+        coins_earned = 0
+        desc = f"Earned from Order #{order_id}"
+
+        # If it's the very first order being processed
+        if order_count <= 1:
+            coins_earned = settings.first_order_coins
+            desc = f"Bonus for First Order #{order_id}"
+        else:
+            if settings.per_order_coins_fixed > 0:
+                coins_earned = settings.per_order_coins_fixed
+            elif settings.spend_per_coin > 0:
+                coins_earned = math.floor(payable_amount / settings.spend_per_coin)
+
         if coins_earned <= 0:
             return 0, None
 
@@ -154,7 +176,7 @@ class WalletService:
             user_id=user_id,
             transaction_type="EARN",
             coins=coins_earned,
-            description=f"Earned from Order #{order_id}",
+            description=desc,
             order_id=order_id,
             commit=commit,
         )

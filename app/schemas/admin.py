@@ -388,11 +388,11 @@ class UpdateAdminRequest(BaseModel):
 
 class CreateBannerRequest(BaseModel):
     title: str
-    subtitle: Optional[str] = None
-    tag: Optional[str] = None
+    subtitle: str
+    tag: str
     image: Optional[str] = None
-    button_text: Optional[str] = None
-    link: Optional[str] = None
+    button_text: str
+    link: str
     sort_order: int = 0
     is_active: bool = True
 

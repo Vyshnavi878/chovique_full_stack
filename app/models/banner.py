@@ -22,11 +22,11 @@ class Banner(Base):
         default=lambda: str(uuid.uuid4()),
     )
     title = Column(String(255), nullable=False)
-    subtitle = Column(Text, nullable=True)
-    tag = Column(String(255), nullable=True)
+    subtitle = Column(Text, nullable=False)
+    tag = Column(String(255), nullable=False)
     image = Column(Text, nullable=False)
-    button_text = Column(String(100), nullable=True)
-    link = Column(String(500), nullable=True)
+    button_text = Column(String(100), nullable=False)
+    link = Column(String(500), nullable=False)
     sort_order = Column(Integer, default=0, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
 

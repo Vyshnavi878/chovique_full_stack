@@ -13,6 +13,11 @@ class TicketFeedbackPayload(BaseModel):
     feedback: str  # 'Resolved' | 'Not Resolved'
 
 
+class UpdateTicketStatusPayload(BaseModel):
+    status: str
+    admin_notes: Optional[str] = None
+
+
 class SupportTicketResponse(BaseModel):
     id: str
     customerId: str

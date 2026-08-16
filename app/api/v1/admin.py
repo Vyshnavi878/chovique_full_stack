@@ -43,7 +43,7 @@ from app.schemas.admin import (
 from app.schemas.home import BannerResponse, ContactInfoResponse, StatsResponse, TestimonialResponse
 from app.schemas.order import OrderResponse
 from app.schemas.reports import ReportQueryRequest, ReportResponse
-from app.schemas.ticket import SupportTicketResponse
+from app.schemas.ticket import SupportTicketResponse, UpdateTicketStatusPayload
 from app.schemas.user import SystemUserResponse
 from app.services.report_service import ReportService
 from app.services.excel_report_service import ExcelReportService
@@ -1580,6 +1580,23 @@ async def get_all_tickets(
 
 
 @router.post(
+    "/tickets/{ticket_id}/status",
+    response_model=SupportTicketResponse,
+    summary="Update support ticket status (admin only)",
+)
+async def update_ticket_status(
+    ticket_id: str,
+    payload: UpdateTicketStatusPayload,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    ticket = await service.update_ticket_status(ticket_id, payload, admin_id=current_user.id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found.")
+    return ticket
+
+@router.put(
     "/tickets/{ticket_id}/resolve",
     response_model=SupportTicketResponse,
     summary="Resolve a support ticket (admin only)",
@@ -1679,10 +1696,10 @@ async def upload_banner_image(
 )
 async def create_banner(
     title: str = Form(...),
-    subtitle: Optional[str] = Form(default=None),
-    tag: Optional[str] = Form(default=None),
-    button_text: Optional[str] = Form(default=None),
-    link: Optional[str] = Form(default=None),
+    subtitle: str = Form(...),
+    tag: str = Form(...),
+    button_text: str = Form(...),
+    link: str = Form(...),
     sort_order: int = Form(default=0),
     is_active: bool = Form(default=True),
     image: UploadFile = File(default=None),

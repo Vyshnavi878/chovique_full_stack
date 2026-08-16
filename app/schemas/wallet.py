@@ -20,6 +20,9 @@ class RewardSettingsSchema(BaseModel):
     spend_per_coin: float = 10.0      # ₹10 spent = 1 coin earned
     coins_per_rupee: float = 10.0     # 10 coins = ₹1 discount
     max_redemption_percentage: float = 20.0  # Max 20% of eligible subtotal can be paid with coins
+    welcome_coins: int = 50           # Coins given to new customers
+    first_order_coins: int = 100      # Bonus coins for first order
+    per_order_coins_fixed: int = 0    # Fixed coins given per order (if 0, relies on spend_per_coin)
 
 
 class UserWalletResponse(BaseModel):

@@ -64,7 +64,7 @@ from app.schemas.admin import (
 from app.schemas.coupon import CouponAdminResponse
 from app.schemas.home import BannerResponse, ContactInfoResponse, StatsResponse, TestimonialResponse
 from app.schemas.order import OrderResponse
-from app.schemas.ticket import SupportTicketResponse
+from app.schemas.ticket import SupportTicketResponse, UpdateTicketStatusPayload
 from app.schemas.user import SystemUserResponse, UserResponse
 from app.services.cloudinary_service import cloudinary_service
 
@@ -1255,6 +1255,52 @@ class AdminService:
             for t in tickets
         ]
 
+    async def update_ticket_status(
+        self,
+        ticket_id: str,
+        payload: UpdateTicketStatusPayload,
+        admin_id: str,
+    ) -> SupportTicketResponse | None:
+        """Update ticket status (intermediate state) and notify user."""
+        from datetime import datetime
+        ticket = await self.ticket_repo.get_by_id(ticket_id)
+        if not ticket:
+            return None
+
+        if ticket.status == "Resolved":
+            raise ValueError("Ticket is already resolved.")
+
+        if ticket.status != payload.status:
+            ticket.status = payload.status
+            ticket.status_change_count += 1
+            if payload.admin_notes:
+                ticket.admin_notes = payload.admin_notes
+            await self.db.commit()
+            await self.db.refresh(ticket)
+
+            # In-App Notification for intermediate status
+            from app.repositories.notification_repository import NotificationRepository
+            notif_repo = NotificationRepository(self.db)
+            await notif_repo.create(
+                user_id=ticket.customer_id,
+                text=f"Your support ticket #{ticket.id} status is now: {ticket.status}.",
+                type="support",
+                reference_id=ticket.id,
+            )
+
+        return SupportTicketResponse(
+            id=ticket.id,
+            customerId=ticket.customer_id,
+            customerName=ticket.customer_name,
+            category=ticket.category,
+            description=ticket.description,
+            status=ticket.status,
+            adminNotes=ticket.admin_notes,
+            customerResolutionFeedback=ticket.customer_resolution_feedback,
+            date=ticket.created_at.strftime("%Y-%m-%d") if ticket.created_at else datetime.now().strftime("%Y-%m-%d"),
+            notified=ticket.notified,
+        )
+
     async def resolve_ticket(
         self,
         ticket_id: str,
@@ -1266,6 +1312,9 @@ class AdminService:
         ticket = await self.ticket_repo.get_by_id(ticket_id)
         if not ticket:
             return None
+
+        if ticket.status_change_count < 2:
+            raise ValueError("You must update the ticket status at least twice before resolving it.")
 
         ticket.status = "Resolved"
         if payload.admin_notes:
@@ -1283,6 +1332,29 @@ class AdminService:
             type="support",
             reference_id=ticket.id,
         )
+
+        try:
+            from app.repositories.user_repository import UserRepository
+            user_repo = UserRepository(self.db)
+            customer = await user_repo.get_by_id(ticket.customer_id)
+            if customer:
+                from app.integrations.resend import resend_email
+                # We assume a send_ticket_resolved method exists, or use send_custom_email
+                if hasattr(resend_email, "send_ticket_resolved"):
+                    await resend_email.send_ticket_resolved(
+                        email=customer.email,
+                        name=customer.full_name,
+                        ticket_id=ticket.id,
+                        category=ticket.category,
+                    )
+                else:
+                    await resend_email.send_custom_email(
+                        to_email=customer.email,
+                        subject=f"Support Ticket #{ticket.id} Resolved",
+                        html_body=f"<p>Hi {customer.full_name},</p><p>Your support ticket #{ticket.id} ({ticket.category}) has been resolved.</p><p>Admin notes: {ticket.admin_notes}</p>"
+                    )
+        except Exception as e:
+            logger.error(f"Failed to send ticket resolution email: {e}")
 
         return SupportTicketResponse(
             id=ticket.id,

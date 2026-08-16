@@ -59,8 +59,6 @@ class Product(Base):
     # ==========================
     description = Column(Text, nullable=True)
     ingredients = Column(Text, nullable=True)
-    nutrition = Column(JSON, nullable=True)
-
     # ==========================
     # Display
     # ==========================
