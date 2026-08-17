@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -51,7 +51,7 @@ from app.services.pdf_report_service import PdfReportService
 from app.services.csv_report_service import CsvReportService
 from app.schemas.category import AdminCategoryResponse, CategoryUpdate
 from app.services.admin_service import AdminService
-from app.schemas.wallet import RewardSettingsSchema, CoinTransactionResponse
+from app.schemas.wallet import RewardSettingsSchema, CoinTransactionResponse, AdminCustomerRewardStat, AdminCoinTransactionItem
 from app.services.wallet_service import WalletService
 from app.models.audit_log import AuditLog
 from app.schemas.admin_profile import AdminProfileResponse, AdminProfileUpdateRequest
@@ -276,6 +276,153 @@ async def get_reward_settings(
 ):
     service = WalletService(db)
     return await service.get_reward_settings()
+
+
+@router.get("/rewards/customers", response_model=List[AdminCustomerRewardStat], summary="Get customer reward overview")
+async def get_admin_customer_rewards(
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.user import User
+    from app.models.order import Order
+    from app.models.wallet import CoinTransaction
+    from sqlalchemy import select, func
+
+    user_stmt = select(User).where(User.role == "customer").order_by(User.created_at.desc())
+    users = (await db.execute(user_stmt)).scalars().all()
+
+    wallet_svc = WalletService(db)
+    results = []
+
+    for user in users:
+        summary = await wallet_svc.compute_user_coin_summary(user.id)
+        
+        fb_cnt = await db.scalar(
+            select(func.count(CoinTransaction.id)).where(
+                CoinTransaction.user_id == user.id,
+                CoinTransaction.type == "FIRST_ORDER_BONUS"
+            )
+        ) or 0
+        
+        if fb_cnt > 0:
+            fo_status = "Awarded"
+        else:
+            order_cnt = await db.scalar(
+                select(func.count(Order.id)).where(
+                    Order.user_id == user.id,
+                    Order.status.notin_(["Cancelled", "CANCELLED"])
+                )
+            ) or 0
+            if order_cnt == 0:
+                fo_status = "Eligible"
+            else:
+                fo_status = "Not Eligible"
+
+        results.append(
+            AdminCustomerRewardStat(
+                user_id=user.id,
+                customer_name=user.full_name or "Customer",
+                customer_email=user.email,
+                available_coins=summary["available_coins"],
+                pending_coins=summary["pending_coins"],
+                total_coins_earned=summary["total_earned"],
+                total_coins_redeemed=summary["total_redeemed"],
+                total_coins_returned=summary["total_returned"],
+                total_coins_reversed=summary["total_reversed"],
+                first_order_bonus_status=fo_status,
+            )
+        )
+
+    return results
+
+
+@router.get("/rewards/transactions", response_model=List[AdminCoinTransactionItem], summary="Get all coin transactions")
+async def get_admin_coin_transactions(
+    type_filter: Optional[str] = None,
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.user import User
+    from app.models.order import Order
+    from app.models.wallet import CoinTransaction
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import select
+
+    wallet_svc = WalletService(db)
+    settings = await wallet_svc.get_reward_settings()
+    delay_hours = getattr(settings, "credit_delay_hours", 24) or 24
+    now_utc = datetime.now(timezone.utc)
+
+    query = select(CoinTransaction, User).outerjoin(User, CoinTransaction.user_id == User.id)
+    if type_filter and type_filter.upper() != "ALL":
+        query = query.where(CoinTransaction.type == type_filter.upper())
+    query = query.order_by(CoinTransaction.created_at.desc()).limit(200)
+
+    rows = (await db.execute(query)).all()
+    results = []
+
+    for tx, user in rows:
+        t_type = (tx.type or "").upper()
+        t_dt = tx.created_at
+        if t_dt and t_dt.tzinfo is None:
+            t_dt = t_dt.replace(tzinfo=timezone.utc)
+
+        status = "Completed"
+        available_at_str = None
+        
+        if t_type in ("EARN", "ORDER_REWARD", "FIRST_ORDER_BONUS") and tx.order_id:
+            ord_obj = await db.get(Order, tx.order_id)
+            if ord_obj and (ord_obj.status or "").lower() in ("cancelled",):
+                status = "Reversed"
+                available_at_str = None
+            else:
+                avail_dt = t_dt + timedelta(hours=delay_hours) if t_dt else None
+                if t_dt and (now_utc < avail_dt):
+                    status = "Pending"
+                    available_at_str = avail_dt.strftime("%d %b %Y, %I:%M %p")
+                else:
+                    status = "Credited"
+        elif t_type in ("WELCOME", "ACCOUNT_CREATION"):
+            status = "Credited"
+        elif t_type in ("REDEEM", "COIN_REDEMPTION"):
+            status = "Redeemed"
+        elif t_type in ("REFUND", "RETURN", "COIN_RETURN"):
+            status = "Returned"
+        elif t_type in ("ADJUSTMENT", "REVERSAL", "COIN_REVERSAL"):
+            status = "Reversed"
+
+        type_display = {
+            "WELCOME": "Account Creation Reward",
+            "ACCOUNT_CREATION": "Account Creation Reward",
+            "FIRST_ORDER_BONUS": "First Order Bonus",
+            "ORDER_REWARD": "Order Reward",
+            "EARN": "Order Reward",
+            "REDEEM": "Coin Redemption",
+            "COIN_REDEMPTION": "Coin Redemption",
+            "REFUND": "Coin Return",
+            "RETURN": "Coin Return",
+            "COIN_RETURN": "Coin Return",
+            "ADJUSTMENT": "Coin Reversal",
+            "REVERSAL": "Coin Reversal",
+            "COIN_REVERSAL": "Coin Reversal",
+        }.get(t_type, t_type)
+
+        results.append(
+            AdminCoinTransactionItem(
+                id=tx.id,
+                customer_name=user.full_name if user else "Unknown",
+                customer_email=user.email if user else "N/A",
+                coins=tx.coins,
+                transaction_type=type_display,
+                status=status,
+                reason=tx.description or "Coin Activity",
+                order_id=tx.order_id,
+                created_at=t_dt.strftime("%d %b %Y, %I:%M %p") if t_dt else "",
+                available_at=available_at_str,
+            )
+        )
+
+    return results
 
 
 # ======================================================

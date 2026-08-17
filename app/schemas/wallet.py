@@ -17,11 +17,12 @@ class CoinTransactionResponse(BaseModel):
 
 class RewardSettingsSchema(BaseModel):
     reward_system_enabled: bool = True
-    spend_per_coin: float = 10.0      # ₹10 spent = 1 coin earned
+    spend_per_coin: float = 10.0      # ₹10 spent = 1 coin earned (10 coins per ₹100)
     coins_per_rupee: float = 10.0     # 10 coins = ₹1 discount
-    max_redemption_percentage: float = 20.0  # Max 20% of eligible subtotal can be paid with coins
-    welcome_coins: int = 50           # Coins given to new customers
-    first_order_coins: int = 100      # Bonus coins for first order
+    max_redemption_percentage: float = 20.0  # Max 20% of subtotal can be paid with coins
+    welcome_coins: int = 100          # Account creation reward = 100 coins
+    first_order_coins: int = 200     # First order bonus = 200 coins
+    credit_delay_hours: int = 24      # 24-hour waiting period for order coins
     per_order_coins_fixed: int = 0    # Fixed coins given per order (if 0, relies on spend_per_coin)
 
 
@@ -29,11 +30,39 @@ class UserWalletResponse(BaseModel):
     id: str
     user_id: str
     coin_balance: int
+    available_coins: int = 0
+    pending_coins: int = 0
     rupee_value: float
     settings: RewardSettingsSchema
     recent_transactions: List[CoinTransactionResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AdminCustomerRewardStat(BaseModel):
+    user_id: str
+    customer_name: str
+    customer_email: str
+    available_coins: int
+    pending_coins: int
+    total_coins_earned: int
+    total_coins_redeemed: int
+    total_coins_returned: int
+    total_coins_reversed: int
+    first_order_bonus_status: str
+
+
+class AdminCoinTransactionItem(BaseModel):
+    id: str
+    customer_name: str
+    customer_email: str
+    coins: int
+    transaction_type: str
+    status: str
+    reason: str
+    order_id: Optional[str] = None
+    created_at: str
+    available_at: Optional[str] = None
 
 
 class CalculateRedemptionRequest(BaseModel):
