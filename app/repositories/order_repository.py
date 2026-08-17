@@ -18,7 +18,12 @@ class OrderRepository:
         Generate atomic, sequential order IDs in the format ORD-00001-D001.
         Uses row locking on OrderSequence (with_for_update) for thread and process concurrency safety.
         """
-        stmt = select(OrderSequence).where(OrderSequence.id == 1).with_for_update()
+        stmt = select(OrderSequence).where(OrderSequence.id == 1)
+        bind_engine = getattr(self.db, "bind", None)
+        engine_name = getattr(bind_engine, "name", "") if bind_engine else ""
+        if engine_name and engine_name != "sqlite":
+            stmt = stmt.with_for_update()
+
         result = await self.db.execute(stmt)
         seq_row = result.scalar_one_or_none()
 

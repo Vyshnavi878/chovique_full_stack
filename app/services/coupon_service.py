@@ -113,7 +113,13 @@ class CouponService:
                 deduped.append(r)
         return deduped
 
-    async def validate_and_calculate_discount(self, user_id: str, code: str) -> CouponValidationResponse:
+    async def validate_and_calculate_discount(
+        self,
+        user_id: str,
+        code: str,
+        items: list[dict] | None = None,
+        subtotal: float | None = None,
+    ) -> CouponValidationResponse:
         coupon = await self.coupon_repo.get_by_code(code)
         if not coupon:
             return CouponValidationResponse(valid=False, code=code, message="Invalid or expired promo code.")
@@ -161,9 +167,6 @@ class CouponService:
                 if str(user_id) not in allowed_users:
                     return CouponValidationResponse(valid=False, code=code, message="This promo code is not valid for your account.")
 
-        # Get Cart to calculate discount
-        cart = await self.cart_repo.get_or_create_user_cart(user_id)
-        
         # Check Product/Category Restrictions (Applicability: Entire Store vs Specific Products vs Specific Categories)
         coupon_categories_q = select(CouponCategory.category_id).where(CouponCategory.coupon_id == coupon.id)
         coupon_categories = (await self.db.scalars(coupon_categories_q)).all()
@@ -176,42 +179,65 @@ class CouponService:
         # Calculate subtotal (eligible vs total)
         total_subtotal = 0.0
         eligible_subtotal = 0.0
+        item_count = 0
         
-        cart_items = cart.items if (cart and cart.items) else []
-        for item in cart_items:
-            prod = item.product
-            item_price = (prod.price or 0.0) * item.quantity
-            total_subtotal += item_price
-            
-            is_eligible = True
-            if allowed_product_ids:
-                prod_matched = (
-                    str(item.product_id) in allowed_product_ids
-                    or (prod and str(prod.id) in allowed_product_ids)
-                    or (prod and prod.sku and str(prod.sku).strip() in allowed_product_ids)
-                    or (prod and prod.slug and str(prod.slug).strip() in allowed_product_ids)
-                    or (prod and prod.name and str(prod.name).strip().lower() in [p.lower() for p in allowed_product_ids])
-                )
-                if not prod_matched:
+        if items is not None:
+            item_count = len(items)
+            for itm in items:
+                pid = itm.get("product_id")
+                qty = itm.get("quantity", 1)
+                price = itm.get("price", 0.0)
+                item_price = price * qty
+                total_subtotal += item_price
+
+                is_eligible = True
+                if allowed_product_ids and str(pid) not in allowed_product_ids:
                     is_eligible = False
 
-            if allowed_category_ids:
-                cat_matched = False
-                if prod:
-                    if prod.category_id and str(prod.category_id) in allowed_category_ids:
-                        cat_matched = True
-                    elif prod.category and str(prod.category).lower() in [c.lower() for c in allowed_category_ids]:
-                        cat_matched = True
-                    elif prod.category_rel:
-                        if str(prod.category_rel.id) in allowed_category_ids or str(prod.category_rel.name).lower() in [c.lower() for c in allowed_category_ids]:
-                            cat_matched = True
-                if not cat_matched:
-                    is_eligible = False
+                if is_eligible:
+                    eligible_subtotal += item_price
+        else:
+            cart = await self.cart_repo.get_or_create_user_cart(user_id)
+            cart_items = cart.items if (cart and cart.items) else []
+            item_count = len(cart_items)
+            for item in cart_items:
+                prod = item.product
+                item_price = (prod.price or 0.0) * item.quantity
+                total_subtotal += item_price
                 
-            if is_eligible:
-                eligible_subtotal += item_price
+                is_eligible = True
+                if allowed_product_ids:
+                    prod_matched = (
+                        str(item.product_id) in allowed_product_ids
+                        or (prod and str(prod.id) in allowed_product_ids)
+                        or (prod and prod.sku and str(prod.sku).strip() in allowed_product_ids)
+                        or (prod and prod.slug and str(prod.slug).strip() in allowed_product_ids)
+                        or (prod and prod.name and str(prod.name).strip().lower() in [p.lower() for p in allowed_product_ids])
+                    )
+                    if not prod_matched:
+                        is_eligible = False
 
-        if len(cart_items) > 0 and (allowed_category_ids or allowed_product_ids) and eligible_subtotal == 0.0:
+                if allowed_category_ids:
+                    cat_matched = False
+                    if prod:
+                        if prod.category_id and str(prod.category_id) in allowed_category_ids:
+                            cat_matched = True
+                        elif prod.category and str(prod.category).lower() in [c.lower() for c in allowed_category_ids]:
+                            cat_matched = True
+                        elif prod.category_rel:
+                            if str(prod.category_rel.id) in allowed_category_ids or str(prod.category_rel.name).lower() in [c.lower() for c in allowed_category_ids]:
+                                cat_matched = True
+                    if not cat_matched:
+                        is_eligible = False
+                    
+                if is_eligible:
+                    eligible_subtotal += item_price
+
+            if len(cart_items) == 0 and subtotal is not None and subtotal > 0 and not allowed_product_ids and not allowed_category_ids:
+                eligible_subtotal = subtotal
+                total_subtotal = subtotal
+
+        if item_count > 0 and (allowed_category_ids or allowed_product_ids) and eligible_subtotal == 0.0:
             return CouponValidationResponse(valid=False, code=code, message="This promo code is only applicable to specific items which are not in your cart.")
 
         if coupon.minimum_order_amount > 0 and eligible_subtotal > 0 and eligible_subtotal < coupon.minimum_order_amount:

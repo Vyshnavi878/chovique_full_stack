@@ -18,6 +18,7 @@ pytestmark = pytest.mark.asyncio
 
 from sqlalchemy import select
 from app.models.coupon import Coupon
+from app.models.product import Product
 
 async def _seed():
     async with TestSessionLocal() as session:
@@ -35,7 +36,21 @@ async def _seed():
                 is_active=True,
             )
             session.add(coupon)
-            await session.commit()
+        
+        prod_res = await session.execute(select(Product).where(Product.id == "p1"))
+        if not prod_res.scalar_one_or_none():
+            product = Product(
+                id="p1",
+                name="Dark Truffle",
+                slug="dark-truffle",
+                description="Rich dark chocolate truffle",
+                price=849.0,
+                stock=100,
+                is_active=True,
+                is_featured=True,
+            )
+            session.add(product)
+        await session.commit()
 
 
 # ==========================================================
@@ -246,7 +261,7 @@ class TestOrders:
         }
 
         res = await authenticated_client.post("/api/v1/orders", json=order_payload)
-        assert res.status_code == 201
+        assert res.status_code == 201, f"POST /api/v1/orders failed: {res.text}"
         order = res.json()
         assert order["id"].startswith("ORD-")
         assert len(order["items"]) == 1

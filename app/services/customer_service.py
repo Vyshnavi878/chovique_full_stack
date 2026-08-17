@@ -69,6 +69,10 @@ class CustomerService:
         elif payload.name is not None:
             update_dict["full_name"] = payload.name
 
+        user = await self.user_repo.get_by_id(user_id)
+        if not user:
+            raise ValueError("User not found.")
+
         if payload.phone is not None:
             update_dict["phone"] = payload.phone
         if payload.gender is not None:
@@ -271,7 +275,7 @@ class CustomerService:
         payload: OrderPayload,
     ) -> OrderResponse:
 
-        async with self.db.begin_nested():
+        try:
             # Validate Shipping Address
             addr = payload.shipping_address
             name_clean = (addr.name or "").strip()
@@ -291,7 +295,10 @@ class CustomerService:
                 raise ValueError("State is required.")
             if not zip_clean or not zip_clean.isdigit() or len(zip_clean) != 6:
                 raise ValueError("ZIP/PIN code must contain exactly 6 numeric digits.")
-            if not phone_clean or not phone_clean.isdigit() or len(phone_clean) != 10:
+            phone_digits = "".join(c for c in phone_clean if c.isdigit())
+            if len(phone_digits) == 12 and phone_digits.startswith("91"):
+                phone_digits = phone_digits[2:]
+            if len(phone_digits) != 10:
                 raise ValueError("Phone number must contain exactly 10 numeric digits.")
 
             # Validate Guest Checkout, COD, and Minimum Order Value via PlatformSettings
@@ -304,7 +311,7 @@ class CustomerService:
                 raise ValueError("Guest checkout is currently disabled by system configuration.")
 
             # Validate Payment Method
-            valid_methods = ["Credit Card", "UPI / Google Pay", "Net Banking", "Cash on Delivery"]
+            valid_methods = ["Credit Card", "UPI / Google Pay", "UPI", "Google Pay", "Net Banking", "Cash on Delivery", "COD", "Cash On Delivery"]
             if not payload.payment_method or payload.payment_method not in valid_methods:
                 raise ValueError("Please select a valid payment option.")
 
@@ -354,7 +361,12 @@ class CustomerService:
             if payload.coupon_code:
                 from app.services.coupon_service import CouponService
                 c_service = CouponService(self.db)
-                val_res = await c_service.validate_and_calculate_discount(user_id, payload.coupon_code)
+                val_res = await c_service.validate_and_calculate_discount(
+                    user_id=user_id,
+                    code=payload.coupon_code,
+                    items=items_data,
+                    subtotal=subtotal,
+                )
                 if not val_res.valid:
                     raise ValueError(val_res.message or "Invalid, expired, or already used coupon code.")
                 coupon_discount = val_res.calculated_discount
@@ -374,6 +386,8 @@ class CustomerService:
                 )
                 if redemption_calc.user_balance < payload.coins_to_use:
                     raise ValueError(f"Insufficient coin balance. Available balance: {redemption_calc.user_balance} coins.")
+                if redemption_calc.allowed_coins <= 0:
+                    raise ValueError(redemption_calc.message or "Reward coins cannot be applied to this order.")
                 coins_used = redemption_calc.allowed_coins
                 coin_discount = redemption_calc.coin_discount
 
@@ -439,7 +453,7 @@ class CustomerService:
             )
             order.coins_earned = coins_earned
 
-            if payload.coupon_code:
+            if payload.coupon_code and coupon_discount > 0:
                 from app.models.coupon import CouponUsage
                 coupon = await self.coupon_repo.get_by_code(payload.coupon_code)
                 if coupon:
@@ -451,37 +465,39 @@ class CustomerService:
                     ))
 
             # Clean up ordered items from database Cart & Wishlist tables
-            try:
-                from app.repositories.cart_repository import CartRepository
-                from app.repositories.wishlist_repository import WishlistRepository
+            from app.repositories.cart_repository import CartRepository
+            from app.repositories.wishlist_repository import WishlistRepository
 
-                cart_repo = CartRepository(self.db)
-                wishlist_repo = WishlistRepository(self.db)
-                user_cart = await cart_repo.get_or_create_user_cart(user_id)
+            cart_repo = CartRepository(self.db)
+            wishlist_repo = WishlistRepository(self.db)
+            user_cart = await cart_repo.get_or_create_user_cart(user_id)
 
-                for item_data in items_data:
-                    pid = item_data["product_id"]
-                    await cart_repo.remove_item(user_cart.id, pid, commit=False)
-                    await wishlist_repo.remove_item(user_id, pid, commit=False)
-                    
-                    # Deduct stock immediately
-                    product = await self.product_repo.get_by_id(pid)
-                    if product:
-                        if product.stock < item_data["quantity"]:
-                            raise ValueError(f"Insufficient stock for '{product.name}'. Only {product.stock} units available.")
-                        new_stock = product.stock - item_data["quantity"]
-                        await self.product_repo.update(product.id, stock=new_stock, commit=False)
-                        if new_stock <= 10:
-                            try:
-                                from app.services.notification_service import NotificationService
-                                notif_svc = NotificationService(self.db)
-                                await notif_svc.notify_low_stock(product.id, product.name, new_stock, commit=False)
-                            except Exception as exc:
-                                logger.error("Failed to send low stock notification on checkout: %s", exc)
+            for item_data in items_data:
+                pid = item_data["product_id"]
+                await cart_repo.remove_item(user_cart.id, pid, commit=False)
+                await wishlist_repo.remove_item(user_id, pid, commit=False)
+                
+                # Deduct stock immediately
+                product = await self.product_repo.get_by_id(pid)
+                if product:
+                    if product.stock < item_data["quantity"]:
+                        raise ValueError(f"Insufficient stock for '{product.name}'. Only {product.stock} units available.")
+                    new_stock = product.stock - item_data["quantity"]
+                    await self.product_repo.update(product.id, stock=new_stock, commit=False)
+                    if new_stock <= 10:
+                        try:
+                            from app.services.notification_service import NotificationService
+                            notif_svc = NotificationService(self.db)
+                            await notif_svc.notify_low_stock(product.id, product.name, new_stock, commit=False)
+                        except Exception as exc:
+                            logger.error("Failed to send low stock notification on checkout: %s", exc)
 
-            except Exception as ex:
-                logger.error(f"Error during post-checkout cleanup: {ex}")
-                raise ex
+            # Atomic commit of all staging changes
+            await self.db.commit()
+
+        except Exception as exc:
+            await self.db.rollback()
+            raise exc
 
         # Send Email Confirmation immediately after transaction commits
         try:
@@ -499,8 +515,6 @@ class CustomerService:
                 )
         except Exception as e:
             logger.error(f"Failed to trigger email for order {order.id}: {e}")
-
-        await self.db.commit()
 
         # Generate & Upload Invoice to Cloudinary
         try:

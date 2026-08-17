@@ -24,11 +24,14 @@ class NotificationRepository:
         )
         return result.scalar_one_or_none()
 
-    async def create(self, **kwargs) -> Notification:
+    async def create(self, commit: bool = True, **kwargs) -> Notification:
         notification = Notification(**kwargs)
         self.db.add(notification)
-        await self.db.commit()
-        await self.db.refresh(notification)
+        if commit:
+            await self.db.commit()
+            await self.db.refresh(notification)
+        else:
+            await self.db.flush()
         return notification
 
     async def mark_read(self, notification_id: str, user_id: str) -> Notification | None:

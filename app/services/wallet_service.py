@@ -150,6 +150,7 @@ class WalletService:
                 related_entity_type="wallet",
                 related_entity_id=order_id,
                 reference_id=order_id,
+                commit=commit,
             )
         except Exception as err:
             logger.debug(f"Failed to create coin redeemed notification: {err}")
@@ -211,6 +212,7 @@ class WalletService:
                 related_entity_type="wallet",
                 related_entity_id=order_id,
                 reference_id=order_id,
+                commit=commit,
             )
         except Exception as err:
             logger.debug(f"Failed to create coin earned notification: {err}")
