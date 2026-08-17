@@ -234,6 +234,76 @@ class TestCoupons:
                 assert c.get("expiryDate") is not None
                 assert c.get("expiry_date") is not None
 
+    async def test_used_coupon_excluded_from_available_and_retained_in_history(
+        self, authenticated_client: AsyncClient
+    ):
+        """
+        When a customer uses a coupon in an order:
+        1. /coupons/available must NOT include the used coupon.
+        2. /users/me/coupons must still include the coupon, marked as 'Used'.
+        3. /coupons/validate must reject the coupon for that user.
+        4. Subsequent order placement with that coupon must fail.
+        """
+        await _seed()
+
+        # Before order: coupon is available in both endpoints
+        avail_res = await authenticated_client.get("/api/v1/coupons/available")
+        assert avail_res.status_code == 200
+        avail_codes = [c["code"] for c in avail_res.json()]
+        assert "CHOVIQUE10" in avail_codes
+
+        history_res = await authenticated_client.get("/api/v1/users/me/coupons")
+        assert history_res.status_code == 200
+        chovique_coupon = next((c for c in history_res.json() if c["code"] == "CHOVIQUE10"), None)
+        assert chovique_coupon is not None
+        assert chovique_coupon["status"] == "Available"
+
+        # Place order using CHOVIQUE10
+        order_payload = {
+            "items": [{"product_id": "p1", "quantity": 1}],
+            "shipping_address": {
+                "name": "Jane Doe",
+                "phone": "+919876543210",
+                "street": "123 Chocolate Lane",
+                "city": "Mumbai",
+                "state": "Maharashtra",
+                "zip": "400001",
+            },
+            "delivery_option": "STANDARD",
+            "payment_method": "COD",
+            "coupon_code": "CHOVIQUE10",
+        }
+        order_res = await authenticated_client.post("/api/v1/orders", json=order_payload)
+        assert order_res.status_code == 201
+
+        # After order:
+        # 1. /coupons/available must NOT include CHOVIQUE10
+        avail_res2 = await authenticated_client.get("/api/v1/coupons/available")
+        assert avail_res2.status_code == 200
+        avail_codes2 = [c["code"] for c in avail_res2.json()]
+        assert "CHOVIQUE10" not in avail_codes2
+
+        # 2. /users/me/coupons must still include CHOVIQUE10, with status 'Used'
+        history_res2 = await authenticated_client.get("/api/v1/users/me/coupons")
+        assert history_res2.status_code == 200
+        chovique_coupon2 = next((c for c in history_res2.json() if c["code"] == "CHOVIQUE10"), None)
+        assert chovique_coupon2 is not None
+        assert chovique_coupon2["status"] == "Used"
+
+        # 3. /coupons/validate must reject the coupon for this customer
+        val_res = await authenticated_client.post(
+            "/api/v1/coupons/validate",
+            json={"code": "CHOVIQUE10"},
+        )
+        assert val_res.status_code == 200
+        val_data = val_res.json()
+        assert val_data["valid"] is False
+        assert "already used" in val_data["message"].lower()
+
+        # 4. Attempting to place another order with CHOVIQUE10 must fail
+        dup_order_res = await authenticated_client.post("/api/v1/orders", json=order_payload)
+        assert dup_order_res.status_code == 400
+
 
 
 # ==========================================================
@@ -280,6 +350,79 @@ class TestOrders:
         single_res = await authenticated_client.get(f"/api/v1/orders/{order['id']}")
         assert single_res.status_code == 200
         assert single_res.json()["id"] == order["id"]
+
+    async def test_place_order_with_unselected_coins(self, authenticated_client: AsyncClient):
+        """When Use Available Coins is unselected (coins_to_use=0), order is placed normally with 0 coin discount."""
+        await _seed()
+        payload = {
+            "items": [{"product_id": "p1", "quantity": 1}],
+            "shipping_address": {
+                "name": "Coins Test User",
+                "street": "123 Main St",
+                "city": "Mumbai",
+                "state": "Maharashtra",
+                "zip": "400001",
+                "phone": "9876543210",
+            },
+            "delivery_option": "Standard Delivery",
+            "payment_method": "UPI",
+            "coins_to_use": 0,
+        }
+        res = await authenticated_client.post("/api/v1/orders", json=payload)
+        assert res.status_code == 201
+        data = res.json()
+        assert data["coins_used"] == 0
+        assert data["coin_discount"] == 0.0
+
+    async def test_place_order_insufficient_coins_validation(self, authenticated_client: AsyncClient):
+        """When requested coins exceed wallet balance, the request is rejected with 400."""
+        await _seed()
+        payload = {
+            "items": [{"product_id": "p1", "quantity": 1}],
+            "shipping_address": {
+                "name": "Coins Test User",
+                "street": "123 Main St",
+                "city": "Mumbai",
+                "state": "Maharashtra",
+                "zip": "400001",
+                "phone": "9876543210",
+            },
+            "delivery_option": "Standard Delivery",
+            "payment_method": "UPI",
+            "coins_to_use": 999999,
+        }
+        res = await authenticated_client.post("/api/v1/orders", json=payload)
+        assert res.status_code == 400
+        assert "Insufficient coin balance" in res.json().get("detail", "")
+
+    async def test_order_placement_atomicity_on_failure(self, authenticated_client: AsyncClient):
+        """When order placement fails due to invalid stock, the transaction is rolled back and no order is created in DB."""
+        await _seed()
+        
+        # Get count of orders before attempt
+        initial_orders_res = await authenticated_client.get("/api/v1/orders")
+        initial_count = len(initial_orders_res.json())
+
+        payload = {
+            "items": [{"product_id": "p1", "quantity": 99999}],  # Out of stock quantity
+            "shipping_address": {
+                "name": "Stock Test User",
+                "street": "123 Main St",
+                "city": "Mumbai",
+                "state": "Maharashtra",
+                "zip": "400001",
+                "phone": "9876543210",
+            },
+            "delivery_option": "Standard Delivery",
+            "payment_method": "UPI",
+            "coupon_code": "CHOVIQUE10",
+        }
+        res = await authenticated_client.post("/api/v1/orders", json=payload)
+        assert res.status_code == 400
+
+        # Check that no new order was created in DB
+        after_orders_res = await authenticated_client.get("/api/v1/orders")
+        assert len(after_orders_res.json()) == initial_count
 
 
 # ==========================================================

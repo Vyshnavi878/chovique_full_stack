@@ -391,7 +391,7 @@ class PdfReportService:
         created_str = order.created_at.strftime('%d %b %Y') if getattr(order, 'created_at', None) else datetime.now().strftime('%d %b %Y')
         payment_method = getattr(order, 'payment_method', 'Cash on Delivery') or 'Cash on Delivery'
         status_val = getattr(order, 'status', 'Confirmed') or 'Confirmed'
-        p_status = getattr(order, 'payment_status', 'Paid') or ('Paid' if status_val != 'Cancelled' else 'Cancelled')
+        p_status = getattr(order, 'payment_status', 'Pending') or 'Pending'
 
         inv_details_text = f"<b>Invoice No:</b> INV-{order.id}<br/><b>Order No:</b> {order.id}<br/><b>Invoice Date:</b> {created_str}<br/><b>Payment Method:</b> {payment_method}<br/><b>Payment Status:</b> {p_status}<br/><b>Order Status:</b> {status_val}"
         inv_details_p = Paragraph(inv_details_text, ParagraphStyle('InvRightText', parent=body_style, alignment=2))

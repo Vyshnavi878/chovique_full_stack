@@ -19,7 +19,22 @@ class CouponService:
         self.cart_repo = CartRepository(db)
         self.order_repo = OrderRepository(db)
 
-    async def get_available_coupons(self, user_id: str) -> list[UserCouponResponse]:
+    async def get_user_coupons(self, user_id: str) -> list[UserCouponResponse]:
+        """
+        Get all coupons for the customer's 'My Coupons' page in the dashboard.
+        Preserves all historical/used/expired statuses so the customer can view their coupon history.
+        """
+        return await self._fetch_coupons(user_id=user_id, only_available=False)
+
+    async def get_available_coupons(self, user_id: str | None = None) -> list[UserCouponResponse]:
+        """
+        Get only currently eligible and usable coupons for Cart / Checkout.
+        Excludes any coupons that are Used (already redeemed by this user), Expired,
+        Not Available (not started yet), Inactive, or exceed usage limits.
+        """
+        return await self._fetch_coupons(user_id=user_id, only_available=True)
+
+    async def _fetch_coupons(self, user_id: str | None = None, only_available: bool = False) -> list[UserCouponResponse]:
         coupons = await self.coupon_repo.get_all()
         now_utc = datetime.now(timezone.utc)
 
@@ -33,7 +48,7 @@ class CouponService:
 
             # 2. Check user-specific usage limit (Per-user usage tracking)
             user_usage = 0
-            if c.per_user_usage_limit > 0:
+            if c.per_user_usage_limit > 0 and user_id and user_id != "guest":
                 user_usage_q = select(func.count(CouponUsage.id)).where(
                     CouponUsage.coupon_id == c.id,
                     CouponUsage.user_id == user_id
@@ -56,7 +71,7 @@ class CouponService:
             is_started = (start_dt <= now_utc) if start_dt else True
             is_not_expired = (exp_dt > now_utc) if exp_dt else True
             is_total_available = (total_usage < c.usage_limit) if c.usage_limit > 0 else True
-            is_user_available = (user_usage < c.per_user_usage_limit) if c.per_user_usage_limit > 0 else True
+            is_user_available = (user_usage < c.per_user_usage_limit) if (c.per_user_usage_limit > 0 and user_id and user_id != "guest") else True
 
             # Determine dynamic status: Available / Used / Expired / Not Available
             if not is_user_available:
@@ -74,7 +89,12 @@ class CouponService:
 
             # Check eligibility rules for inclusion (e.g. FIRST_ORDER, SPECIFIC_USERS)
             if hasattr(c, "eligibility_rule") and c.eligibility_rule == "SPECIFIC_USERS":
-                if c.eligibility_value and str(user_id) not in c.eligibility_value.split(","):
+                if c.eligibility_value and user_id and str(user_id) not in c.eligibility_value.split(","):
+                    continue
+
+            # If only_available is requested (for Cart / Checkout), exclude used/expired/inactive/not available
+            if only_available:
+                if status_str != "Available" or not is_active:
                     continue
 
             exp_str = c.expires_at.strftime("%Y-%m-%d") if c.expires_at else None

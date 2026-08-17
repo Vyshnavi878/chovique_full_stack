@@ -103,12 +103,22 @@ class WalletService:
 
         coin_discount = round(allowed_coins / settings.coins_per_rupee, 2) if settings.coins_per_rupee > 0 else 0.0
 
-        msg = f"{allowed_coins} coins applied for Rs. {coin_discount} discount."
-        if coins_requested > allowed_coins:
-            if wallet.coin_balance < coins_requested:
+        if allowed_coins <= 0:
+            if wallet.coin_balance <= 0:
+                msg = "Available reward coins are insufficient for redemption on this order."
+            elif max_usable_coins <= 0:
+                msg = "Reward coins cannot be applied to this order."
+            elif wallet.coin_balance < coins_requested:
                 msg = f"Requested {coins_requested} coins, but available balance is {wallet.coin_balance} coins."
             else:
-                msg = f"Maximum allowed coins for this order is {max_usable_coins} ({settings.max_redemption_percentage}% of order value)."
+                msg = "Available reward coins are insufficient for redemption on this order."
+        else:
+            msg = f"{allowed_coins} coins applied for Rs. {coin_discount} discount."
+            if coins_requested > allowed_coins:
+                if wallet.coin_balance < coins_requested:
+                    msg = f"Requested {coins_requested} coins, but available balance is {wallet.coin_balance} coins."
+                else:
+                    msg = f"Maximum allowed coins for this order is {max_usable_coins} ({settings.max_redemption_percentage}% of order value)."
 
         return CalculateRedemptionResponse(
             user_balance=wallet.coin_balance,

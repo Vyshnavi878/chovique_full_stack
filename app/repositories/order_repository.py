@@ -185,10 +185,16 @@ class OrderRepository:
             if status in ("Out_For_Delivery", "Out for Delivery"):
                 query = query.where(Order.status.in_(["Out_For_Delivery", "Out for Delivery"]))
             else:
-                query = query.where(Order.status == status)
+                query = query.where(func.lower(Order.status) == status.lower())
 
         if payment_status and payment_status.upper() != "ALL":
-            query = query.where(Order.payment_status == payment_status.upper())
+            p_val = payment_status.strip().lower()
+            if p_val in ("refund pending", "refund_pending"):
+                query = query.where(func.lower(Order.payment_status).in_(["refund pending", "refund_pending"]))
+            elif p_val in ("partially refunded", "partially_refunded"):
+                query = query.where(func.lower(Order.payment_status).in_(["partially refunded", "partially_refunded"]))
+            else:
+                query = query.where(func.lower(Order.payment_status) == p_val)
 
         if search and search.strip():
             like = f"%{search.strip().lower()}%"
@@ -272,13 +278,13 @@ class OrderRepository:
             select(Order.status, func.count().label("cnt"))
             .group_by(Order.status)
         )
-        fulfillment_counts = {row.status: row.cnt for row in fulfillment_q}
+        f_counts_lower = {str(row.status or "").lower(): row.cnt for row in fulfillment_q}
 
         payment_q = await self.db.execute(
             select(Order.payment_status, func.count().label("cnt"))
             .group_by(Order.payment_status)
         )
-        payment_counts = {row.payment_status: row.cnt for row in payment_q}
+        p_counts_lower = {str(row.payment_status or "").lower(): row.cnt for row in payment_q}
 
         revenue_q = await self.db.execute(
             select(func.coalesce(func.sum(Order.total), 0.0))
@@ -289,19 +295,25 @@ class OrderRepository:
         total_orders_q = await self.db.execute(select(func.count()).select_from(Order))
         total_orders = total_orders_q.scalar_one()
 
-        out_for_delivery_cnt = fulfillment_counts.get("Out_For_Delivery", 0) + fulfillment_counts.get("Out for Delivery", 0)
+        out_for_delivery_cnt = f_counts_lower.get("out_for_delivery", 0) + f_counts_lower.get("out for delivery", 0)
+        refund_pending_cnt = p_counts_lower.get("refund pending", 0) + p_counts_lower.get("refund_pending", 0)
+        partially_refunded_cnt = p_counts_lower.get("partially refunded", 0) + p_counts_lower.get("partially_refunded", 0)
 
         return {
             "total_orders": total_orders,
-            "processing": fulfillment_counts.get("Processing", 0),
-            "confirmed": fulfillment_counts.get("Confirmed", 0),
-            "shipped": fulfillment_counts.get("Shipped", 0),
+            "processing": f_counts_lower.get("processing", 0),
+            "confirmed": f_counts_lower.get("confirmed", 0),
+            "shipped": f_counts_lower.get("shipped", 0),
             "out_for_delivery": out_for_delivery_cnt,
-            "delivered": fulfillment_counts.get("Delivered", 0),
-            "cancelled": fulfillment_counts.get("Cancelled", 0),
-            "pending_payment": payment_counts.get("PENDING", 0),
-            "paid": payment_counts.get("PAID", 0),
-            "failed_payment": payment_counts.get("FAILED", 0),
-            "refunded": payment_counts.get("REFUNDED", 0),
+            "delivered": f_counts_lower.get("delivered", 0),
+            "cancelled": f_counts_lower.get("cancelled", 0),
+            "pending": f_counts_lower.get("pending", 0),
+            "returned": f_counts_lower.get("returned", 0),
+            "pending_payment": p_counts_lower.get("pending", 0),
+            "paid": p_counts_lower.get("paid", 0),
+            "failed_payment": p_counts_lower.get("failed", 0),
+            "refunded": p_counts_lower.get("refunded", 0),
+            "refund_pending": refund_pending_cnt,
+            "partially_refunded": partially_refunded_cnt,
             "total_revenue": total_revenue,
         }

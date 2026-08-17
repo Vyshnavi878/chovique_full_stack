@@ -518,19 +518,34 @@ class AdminService:
     # ==========================================================
 
     _FULFILLMENT_TRANSITIONS: dict[str, set[str]] = {
-        "Processing":       {"Confirmed", "Cancelled"},
-        "Confirmed":        {"Shipped", "Cancelled"},
-        "Shipped":          {"Out_For_Delivery", "Cancelled"},
-        "Out_For_Delivery": {"Delivered"},
-        "Delivered":        set(),   # terminal
+        "Pending":          {"Confirmed", "Processing", "Cancelled"},
+        "Confirmed":        {"Processing", "Shipped", "Cancelled"},
+        "Processing":       {"Confirmed", "Shipped", "Cancelled"},
+        "Shipped":          {"Out for Delivery", "Out_For_Delivery", "Delivered", "Cancelled"},
+        "Out for Delivery": {"Delivered", "Cancelled"},
+        "Out_For_Delivery": {"Delivered", "Cancelled"},
+        "Delivered":        {"Returned"},
         "Cancelled":        set(),   # terminal
+        "Returned":         set(),   # terminal
     }
 
     _PAYMENT_TRANSITIONS: dict[str, set[str]] = {
-        "PENDING":  {"PAID", "FAILED"},
-        "PAID":     {"REFUNDED"},
-        "FAILED":   {"PENDING"},    # allow retry
-        "REFUNDED": set(),          # terminal
+        "Pending":            {"Processing", "Paid", "Failed", "Cancelled"},
+        "PENDING":            {"Processing", "Paid", "Failed", "Cancelled"},
+        "Processing":         {"Paid", "Failed", "Cancelled"},
+        "PROCESSING":         {"Paid", "Failed", "Cancelled"},
+        "Paid":               {"Refund Pending", "Refunded", "Partially Refunded"},
+        "PAID":               {"Refund Pending", "Refunded", "Partially Refunded"},
+        "Failed":             {"Pending", "Cancelled"},
+        "FAILED":             {"Pending", "Cancelled"},
+        "Cancelled":          set(),
+        "CANCELLED":          set(),
+        "Refund Pending":     {"Refunded", "Partially Refunded"},
+        "REFUND PENDING":     {"Refunded", "Partially Refunded"},
+        "Partially Refunded": {"Refunded"},
+        "PARTIALLY REFUNDED": {"Refunded"},
+        "Refunded":           set(),
+        "REFUNDED":           set(),
     }
 
     # ==========================================================
@@ -539,17 +554,34 @@ class AdminService:
 
     def _validate_fulfillment_transition(self, current: str, new_status: str) -> None:
         """Raise ValueError if the transition is not allowed."""
-        allowed = self._FULFILLMENT_TRANSITIONS.get(current, set())
-        if new_status != current and new_status not in allowed:
+        c_clean = current.strip()
+        n_clean = new_status.strip()
+        allowed = self._FULFILLMENT_TRANSITIONS.get(c_clean, set())
+        # If not found directly, try case-insensitive
+        if not allowed:
+            for k, v in self._FULFILLMENT_TRANSITIONS.items():
+                if k.lower() == c_clean.lower():
+                    allowed = v
+                    break
+        allowed_lower = {x.lower() for x in allowed}
+        if n_clean.lower() != c_clean.lower() and n_clean.lower() not in allowed_lower:
             raise ValueError(
-                f"Cannot transition fulfillment from '{current}' to '{new_status}'. "
+                f"Cannot transition order status from '{current}' to '{new_status}'. "
                 f"Allowed next states: {sorted(allowed) or 'none (terminal state)'}."
             )
 
     def _validate_payment_transition(self, current: str, new_status: str) -> None:
         """Raise ValueError if the payment transition is not allowed."""
-        allowed = self._PAYMENT_TRANSITIONS.get(current, set())
-        if new_status != current and new_status not in allowed:
+        c_clean = current.strip()
+        n_clean = new_status.strip()
+        allowed = self._PAYMENT_TRANSITIONS.get(c_clean, set())
+        if not allowed:
+            for k, v in self._PAYMENT_TRANSITIONS.items():
+                if k.lower() == c_clean.lower():
+                    allowed = v
+                    break
+        allowed_lower = {x.lower() for x in allowed}
+        if n_clean.lower() != c_clean.lower() and n_clean.lower() not in allowed_lower:
             raise ValueError(
                 f"Cannot transition payment from '{current}' to '{new_status}'. "
                 f"Allowed next states: {sorted(allowed) or 'none (terminal state)'}."
@@ -765,14 +797,14 @@ class AdminService:
         if not order:
             raise ValueError(f"Order '{order_id}' not found.")
 
-        current_ps = (order.payment_status or "PENDING").upper()
-        new_ps = payload.payment_status  # already uppercased by validator
+        current_ps = (order.payment_status or "Pending").strip()
+        new_ps = payload.payment_status
 
         self._validate_payment_transition(current_ps, new_ps)
 
         # COD guard: marking PENDING → PAID on a COD order requires explicit override flag
         is_cod = (order.payment_method or "").upper() in ("COD", "CASH ON DELIVERY")
-        if is_cod and new_ps == "PAID" and current_ps == "PENDING":
+        if is_cod and new_ps.upper() == "PAID" and current_ps.upper() in ("PENDING", "PENDING_PAYMENT"):
             if not payload.is_cod_override:
                 raise ValueError(
                     "COD orders can only be marked as PAID using the explicit "

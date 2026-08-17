@@ -9,7 +9,7 @@ class CartRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_or_create_user_cart(self, user_id: str) -> Cart:
+    async def get_or_create_user_cart(self, user_id: str, commit: bool = True) -> Cart:
         result = await self.db.execute(
             select(Cart)
             .options(selectinload(Cart.items).selectinload(CartItem.product))
@@ -21,8 +21,11 @@ class CartRepository:
         if not cart:
             cart = Cart(user_id=user_id)
             self.db.add(cart)
-            await self.db.commit()
-            await self.db.refresh(cart)
+            if commit:
+                await self.db.commit()
+                await self.db.refresh(cart)
+            else:
+                await self.db.flush()
             # Fetch with loaded relationships
             result = await self.db.execute(
                 select(Cart)

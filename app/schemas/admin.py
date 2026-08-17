@@ -181,22 +181,36 @@ class CustomerUpdatePayload(BaseModel):
 
 
 class UpdateOrderStatusPayload(BaseModel):
-    status: Optional[str] = None      # Fulfillment: Processing / Confirmed / Shipped / Out_For_Delivery / Delivered / Cancelled
-    payment_status: Optional[str] = None  # Payment: PENDING / PAID / FAILED / REFUNDED
+    status: Optional[str] = None      # Order Status: Pending / Confirmed / Processing / Shipped / Out for Delivery / Delivered / Cancelled / Returned
+    payment_status: Optional[str] = None  # Payment Status: Pending / Processing / Paid / Failed / Cancelled / Refund Pending / Refunded / Partially Refunded
 
 
 class FulfillmentStatusPayload(BaseModel):
-    """Payload for updating fulfillment status only."""
+    """Payload for updating order fulfillment status only."""
     status: str
     notes: Optional[str] = None  # Optional admin note for audit log
 
     @field_validator("status")
     @classmethod
     def validate_status(cls, v: str) -> str:
-        valid = {"Processing", "Confirmed", "Shipped", "Out_For_Delivery", "Delivered", "Cancelled"}
-        if v not in valid:
-            raise ValueError(f"Invalid fulfillment status '{v}'. Must be one of: {', '.join(sorted(valid))}")
-        return v
+        v_clean = v.strip()
+        if v_clean == "Out_For_Delivery":
+            v_clean = "Out for Delivery"
+        valid = {
+            "Pending",
+            "Confirmed",
+            "Processing",
+            "Shipped",
+            "Out for Delivery",
+            "Delivered",
+            "Cancelled",
+            "Returned",
+        }
+        # Case-insensitive match to canonical title
+        valid_map = {s.lower(): s for s in valid}
+        if v_clean.lower() not in valid_map:
+            raise ValueError(f"Invalid order status '{v}'. Must be one of: {', '.join(sorted(valid))}")
+        return valid_map[v_clean.lower()]
 
 
 class PaymentStatusPayload(BaseModel):
@@ -208,27 +222,46 @@ class PaymentStatusPayload(BaseModel):
     @field_validator("payment_status")
     @classmethod
     def validate_payment_status(cls, v: str) -> str:
-        valid = {"PENDING", "PAID", "FAILED", "REFUNDED"}
-        v_upper = v.upper()
-        if v_upper not in valid:
+        v_clean = v.strip()
+        if v_clean.upper() == "REFUND_PENDING":
+            v_clean = "Refund Pending"
+        elif v_clean.upper() == "PARTIALLY_REFUNDED":
+            v_clean = "Partially Refunded"
+            
+        valid = {
+            "Pending",
+            "Processing",
+            "Paid",
+            "Failed",
+            "Cancelled",
+            "Refund Pending",
+            "Refunded",
+            "Partially Refunded",
+        }
+        valid_map = {s.lower(): s for s in valid}
+        if v_clean.lower() not in valid_map:
             raise ValueError(f"Invalid payment status '{v}'. Must be one of: {', '.join(sorted(valid))}")
-        return v_upper
+        return valid_map[v_clean.lower()]
 
 
 class OrderSummaryStats(BaseModel):
     """KPI snapshot included in the paginated orders list response."""
     total_orders: int
-    processing: int
-    confirmed: int
-    shipped: int
-    out_for_delivery: int
-    delivered: int
-    cancelled: int
-    pending_payment: int
-    paid: int
-    failed_payment: int
-    refunded: int
-    total_revenue: float  # Sum of non-cancelled orders
+    processing: int = 0
+    confirmed: int = 0
+    shipped: int = 0
+    out_for_delivery: int = 0
+    delivered: int = 0
+    cancelled: int = 0
+    pending: int = 0
+    returned: int = 0
+    pending_payment: int = 0
+    paid: int = 0
+    failed_payment: int = 0
+    refunded: int = 0
+    refund_pending: int = 0
+    partially_refunded: int = 0
+    total_revenue: float = 0.0  # Sum of non-cancelled orders
 
 
 class AdminOrderListResponse(BaseModel):

@@ -327,7 +327,7 @@ class CustomerService:
             if not items_to_process:
                 from app.repositories.cart_repository import CartRepository
                 cart_repo = CartRepository(self.db)
-                user_cart = await cart_repo.get_or_create_user_cart(user_id)
+                user_cart = await cart_repo.get_or_create_user_cart(user_id, commit=False)
                 items_to_process = [
                     type("CartItemPayload", (), {"product_id": ci.product_id, "quantity": ci.quantity})()
                     for ci in user_cart.items
@@ -470,7 +470,7 @@ class CustomerService:
 
             cart_repo = CartRepository(self.db)
             wishlist_repo = WishlistRepository(self.db)
-            user_cart = await cart_repo.get_or_create_user_cart(user_id)
+            user_cart = await cart_repo.get_or_create_user_cart(user_id, commit=False)
 
             for item_data in items_data:
                 pid = item_data["product_id"]
@@ -531,8 +531,12 @@ class CustomerService:
         except Exception as e:
             logger.warning(f"Failed to process Cloudinary invoice for order {order.id}: {e}")
 
-        db_order = await self.order_repo.get_by_id(order.id)
-        return self._format_order_response(db_order or order)
+        try:
+            db_order = await self.order_repo.get_by_id(order.id)
+            return self._format_order_response(db_order or order)
+        except Exception as e:
+            logger.error(f"Failed to format order response for order {order.id}: {e}")
+            return self._format_order_response(order)
 
     async def get_user_orders(self, user_id: str, role: str = "customer") -> list[OrderResponse]:
         if role in ["admin", "superadmin"]:
@@ -564,7 +568,7 @@ class CustomerService:
             if not ps.order_cancellation_enabled:
                 raise ValueError("Order cancellation is currently disabled by system configuration.")
 
-            if order.status != "Processing":
+            if order.status not in ("Pending", "Confirmed", "Processing"):
                 raise ValueError("Order cannot be cancelled in its current state.")
 
             if ps.cancellation_time_limit > 0 and order.created_at:
@@ -578,6 +582,11 @@ class CustomerService:
                     raise ValueError(f"Order cancellation time limit ({ps.cancellation_time_limit} hours) has passed.")
 
             order.status = "Cancelled"
+            current_ps = (order.payment_status or "Pending").strip()
+            if current_ps.upper() == "PAID":
+                order.payment_status = "Refund Pending"
+            elif current_ps.upper() in ("PENDING", "PROCESSING"):
+                order.payment_status = "Cancelled"
 
             # Refund coins used and reverse coins earned
             from app.services.wallet_service import WalletService
@@ -606,26 +615,45 @@ class CustomerService:
     def _format_order_response(self, order) -> OrderResponse:
         cart_items = []
         for item in getattr(order, "items", []) or []:
-            if item.product:
-                product_res = ProductResponse.from_orm_model(item.product)
+            if getattr(item, "product", None):
+                try:
+                    product_res = ProductResponse.from_orm_model(item.product)
+                except Exception:
+                    product_res = ProductResponse(
+                        id=str(getattr(item.product, "id", "") or item.product_id or "unknown"),
+                        name=getattr(item.product, "name", "Chovique Product") or "Chovique Product",
+                        slug=getattr(item.product, "slug", "product") or "product",
+                        category=getattr(item.product, "category", "Chocolates") or "Chocolates",
+                        price=float(getattr(item.product, "price", item.price or 0.0) or 0.0),
+                    )
             else:
                 product_res = ProductResponse(
-                    id=item.product_id or "unknown",
+                    id=str(item.product_id or "unknown"),
                     name="Chovique Product",
                     slug="product",
                     category="Chocolates",
-                    price=item.price or 0.0,
+                    price=float(item.price or 0.0),
                 )
-            cart_items.append(CartItemResponse(product=product_res, quantity=item.quantity))
+            cart_items.append(CartItemResponse(product=product_res, quantity=item.quantity or 1))
 
-        if isinstance(order.shipping_address, dict):
+        ship_addr_raw = getattr(order, "shipping_address", None)
+        if isinstance(ship_addr_raw, dict):
             ship_addr = ShippingAddressSchema(
-                name=order.shipping_address.get("name", ""),
-                street=order.shipping_address.get("street", ""),
-                city=order.shipping_address.get("city", ""),
-                state=order.shipping_address.get("state", ""),
-                zip=str(order.shipping_address.get("zip", "")),
-                phone=str(order.shipping_address.get("phone", "")),
+                name=str(ship_addr_raw.get("name") or ""),
+                street=str(ship_addr_raw.get("street") or ""),
+                city=str(ship_addr_raw.get("city") or ""),
+                state=str(ship_addr_raw.get("state") or ""),
+                zip=str(ship_addr_raw.get("zip") or ship_addr_raw.get("zip_code") or ""),
+                phone=str(ship_addr_raw.get("phone") or ""),
+            )
+        elif hasattr(ship_addr_raw, "name"):
+            ship_addr = ShippingAddressSchema(
+                name=str(getattr(ship_addr_raw, "name", "") or ""),
+                street=str(getattr(ship_addr_raw, "street", "") or ""),
+                city=str(getattr(ship_addr_raw, "city", "") or ""),
+                state=str(getattr(ship_addr_raw, "state", "") or ""),
+                zip=str(getattr(ship_addr_raw, "zip", "") or ""),
+                phone=str(getattr(ship_addr_raw, "phone", "") or ""),
             )
         else:
             ship_addr = ShippingAddressSchema(name="", street="", city="", state="", zip="", phone="")
@@ -633,24 +661,24 @@ class CustomerService:
         created_date = order.created_at.strftime("%Y-%m-%d") if getattr(order, "created_at", None) else datetime.now().strftime("%Y-%m-%d")
 
         return OrderResponse(
-            id=order.id,
+            id=str(order.id),
             items=cart_items,
-            total=order.total,
-            subtotal=order.subtotal,
-            discount=order.discount,
+            total=float(order.total or 0.0),
+            subtotal=float(order.subtotal or 0.0),
+            discount=float(order.discount or 0.0),
             coupon_code=order.coupon_code,
-            coupon_discount=order.coupon_discount or 0.0,
-            coins_used=order.coins_used or 0,
-            coin_discount=order.coin_discount or 0.0,
-            coins_earned=order.coins_earned or 0,
-            shipping=order.shipping or 0.0,
-            tax=order.tax or 0.0,
+            coupon_discount=float(order.coupon_discount or 0.0),
+            coins_used=int(order.coins_used or 0),
+            coin_discount=float(order.coin_discount or 0.0),
+            coins_earned=int(order.coins_earned or 0),
+            shipping=float(order.shipping or 0.0),
+            tax=float(order.tax or 0.0),
             date=created_date,
-            status=order.status,
-            payment_status=getattr(order, "payment_status", "PENDING") or "PENDING",
+            status=str(order.status or "Processing"),
+            payment_status=str(getattr(order, "payment_status", "PENDING") or "PENDING"),
             shippingAddress=ship_addr,
-            deliveryOption=order.delivery_option or "Standard Delivery",
-            paymentMethod=order.payment_method or "UPI",
+            deliveryOption=str(order.delivery_option or "Standard Delivery"),
+            paymentMethod=str(order.payment_method or "UPI"),
             invoice_url=getattr(order, "invoice_url", None),
             user_id=getattr(order, "user_id", None),
         )

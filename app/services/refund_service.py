@@ -72,6 +72,10 @@ class RefundService:
             status="processed",
         )
 
+        # Update payment_status independently
+        order.payment_status = "Refunded" if refund_amount >= order.total else "Partially Refunded"
+        await self.db.commit()
+
         # Send refund notification email
         user = await self.user_repo.get_by_id(order.user_id)
         if user:

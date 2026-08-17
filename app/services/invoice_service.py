@@ -65,7 +65,7 @@ class InvoiceService:
         )
         payment_method = getattr(order, 'payment_method', 'UPI') or 'UPI'
         order_status = getattr(order, 'status', 'Processing') or 'Processing'
-        payment_status = "Paid" if order_status in ["Processing", "Shipped", "Delivered"] else order_status
+        payment_status = getattr(order, 'payment_status', 'Pending') or 'Pending'
 
         html = f"""<!DOCTYPE html>
 <html>

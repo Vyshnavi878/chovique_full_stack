@@ -16,10 +16,11 @@ router = APIRouter(prefix="/coupons", tags=["Coupons"])
 )
 async def get_available_coupons(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     service = CouponService(db)
-    return await service.get_available_coupons(current_user.id)
+    user_id = current_user.id if current_user else None
+    return await service.get_available_coupons(user_id)
 
 @router.post(
     "/validate",
