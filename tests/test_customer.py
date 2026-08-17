@@ -212,6 +212,13 @@ class TestCoupons:
         assert res.status_code == 200
         coupons = res.json()
         assert len(coupons) > 0
+        for c in coupons:
+            assert "code" in c
+            assert "status" in c
+            if c.get("expires_at"):
+                assert c.get("expiryDate") is not None
+                assert c.get("expiry_date") is not None
+
 
 
 # ==========================================================
@@ -320,6 +327,13 @@ class TestSupportAndNotifications:
         assert notif["read"] is False
         assert notif["type"] == "support"
         notif_id = notif["id"]
+
+        # Test unread query param filter
+        unread_res = await authenticated_client.get("/api/v1/users/me/notifications?is_read=false")
+        assert unread_res.status_code == 200
+        assert len(unread_res.json()) >= 1
+        for n in unread_res.json():
+            assert n["is_read"] is False
 
         # Mark single read
         read_res = await authenticated_client.patch(

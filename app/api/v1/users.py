@@ -40,5 +40,13 @@ async def get_me(
 
     return user
 
+from app.schemas.coupon import UserCouponResponse
+from app.services.coupon_service import CouponService
 
-
+@router.get("/me/coupons", response_model=list[UserCouponResponse], summary="Get available coupons for current user")
+async def get_my_user_coupons(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = CouponService(db)
+    return await service.get_available_coupons(current_user.id)

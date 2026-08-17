@@ -8,12 +8,14 @@ class NotificationRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_user_notifications(self, user_id: str) -> list[Notification]:
-        result = await self.db.execute(
-            select(Notification)
-            .where(Notification.user_id == user_id)
-            .order_by(Notification.created_at.desc())
-        )
+    async def get_user_notifications(self, user_id: str, is_read: bool | None = None) -> list[Notification]:
+        query = select(Notification).where(Notification.user_id == user_id)
+        if is_read is False:
+            query = query.where((Notification.is_read == False) & (Notification.read == False))
+        elif is_read is True:
+            query = query.where((Notification.is_read == True) | (Notification.read == True))
+        query = query.order_by(Notification.created_at.desc())
+        result = await self.db.execute(query)
         return list(result.scalars().all())
 
     async def get_by_id(self, notification_id: str) -> Notification | None:

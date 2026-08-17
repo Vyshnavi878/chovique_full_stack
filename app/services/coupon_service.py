@@ -77,6 +77,9 @@ class CouponService:
                 if c.eligibility_value and str(user_id) not in c.eligibility_value.split(","):
                     continue
 
+            exp_str = c.expires_at.strftime("%Y-%m-%d") if c.expires_at else None
+            start_str = c.start_at.strftime("%Y-%m-%d") if c.start_at else None
+
             resp = UserCouponResponse(
                 id=c.id,
                 code=c.code,
@@ -90,6 +93,12 @@ class CouponService:
                 minimum_order_amount=c.minimum_order_amount or 0.0,
                 start_at=c.start_at,
                 expires_at=c.expires_at,
+                startDate=start_str,
+                expiryDate=exp_str,
+                start_date=start_str,
+                expiry_date=exp_str,
+                expiresAt=exp_str,
+                startAt=start_str,
                 is_active=is_active,
                 status=status_str,
             )

@@ -182,11 +182,12 @@ async def get_my_coupons(
     summary="Get notifications for authenticated user",
 )
 async def get_notifications(
+    is_read: bool | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     service = CustomerService(db)
-    return await service.get_user_notifications(current_user.id)
+    return await service.get_user_notifications(current_user.id, is_read=is_read)
 
 
 @router.get(

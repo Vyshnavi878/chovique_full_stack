@@ -148,10 +148,14 @@ class CouponRepository:
             raise ValueError(f"A coupon with code '{code_clean}' already exists.")
 
         kwargs["code"] = code_clean
-        if "expires_at" in kwargs and kwargs["expires_at"]:
-            kwargs["expires_at"] = self._parse_expires_at(kwargs["expires_at"])
-        if "start_at" in kwargs and kwargs["start_at"]:
-            kwargs["start_at"] = self._parse_datetime(kwargs["start_at"], is_end_of_day=False)
+
+        expires_raw = kwargs.pop("expires_at", None) or kwargs.pop("expiryDate", None) or kwargs.pop("expiry_date", None) or kwargs.pop("expiresAt", None) or kwargs.pop("endDate", None) or kwargs.pop("end_date", None)
+        if expires_raw:
+            kwargs["expires_at"] = self._parse_expires_at(expires_raw)
+
+        start_raw = kwargs.pop("start_at", None) or kwargs.pop("startDate", None) or kwargs.pop("start_date", None) or kwargs.pop("startAt", None) or kwargs.pop("begin_date", None)
+        if start_raw:
+            kwargs["start_at"] = self._parse_datetime(start_raw, is_end_of_day=False)
 
         eligibility_rule = kwargs.pop("eligibility_rule", None)
         eligibility_value = kwargs.pop("eligibility_value", None)
@@ -191,10 +195,13 @@ class CouponRepository:
         if not coupon:
             return None
         
-        if "expires_at" in kwargs and kwargs["expires_at"]:
-            kwargs["expires_at"] = self._parse_expires_at(kwargs["expires_at"])
-        if "start_at" in kwargs and kwargs["start_at"]:
-            kwargs["start_at"] = self._parse_datetime(kwargs["start_at"], is_end_of_day=False)
+        expires_raw = kwargs.pop("expires_at", None) or kwargs.pop("expiryDate", None) or kwargs.pop("expiry_date", None) or kwargs.pop("expiresAt", None) or kwargs.pop("endDate", None) or kwargs.pop("end_date", None)
+        if expires_raw:
+            kwargs["expires_at"] = self._parse_expires_at(expires_raw)
+
+        start_raw = kwargs.pop("start_at", None) or kwargs.pop("startDate", None) or kwargs.pop("start_date", None) or kwargs.pop("startAt", None) or kwargs.pop("begin_date", None)
+        if start_raw:
+            kwargs["start_at"] = self._parse_datetime(start_raw, is_end_of_day=False)
 
         kwargs.pop("eligibility_rule", None)
         kwargs.pop("eligibility_value", None)

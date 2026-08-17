@@ -29,6 +29,12 @@ class UserCouponResponse(BaseModel):
     minimum_order_amount: float = 0.0
     start_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
+    startDate: Optional[str] = None
+    expiryDate: Optional[str] = None
+    start_date: Optional[str] = None
+    expiry_date: Optional[str] = None
+    expiresAt: Optional[str] = None
+    startAt: Optional[str] = None
     is_active: bool = True
     status: str = "ACTIVE"
 
@@ -47,6 +53,12 @@ class CouponCreate(BaseModel):
     minimum_order_amount: float = 0.0
     start_at: Optional[str] = None
     expires_at: Optional[str] = None
+    startDate: Optional[str] = None
+    expiryDate: Optional[str] = None
+    start_date: Optional[str] = None
+    expiry_date: Optional[str] = None
+    expiresAt: Optional[str] = None
+    startAt: Optional[str] = None
     usage_limit: int = 0
     per_user_usage_limit: int = 1
     is_active: bool = True
@@ -59,7 +71,7 @@ class CouponCreate(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    @field_validator("start_at", "expires_at", mode="before")
+    @field_validator("start_at", "expires_at", "startDate", "expiryDate", "start_date", "expiry_date", "expiresAt", "startAt", mode="before")
     @classmethod
     def clean_empty_date_strings(cls, v):
         if v is None or (isinstance(v, str) and not v.strip()):
@@ -99,6 +111,12 @@ class CouponUpdate(BaseModel):
     minimum_order_amount: Optional[float] = None
     start_at: Optional[str] = None
     expires_at: Optional[str] = None
+    startDate: Optional[str] = None
+    expiryDate: Optional[str] = None
+    start_date: Optional[str] = None
+    expiry_date: Optional[str] = None
+    expiresAt: Optional[str] = None
+    startAt: Optional[str] = None
     usage_limit: Optional[int] = None
     per_user_usage_limit: Optional[int] = None
     is_active: Optional[bool] = None

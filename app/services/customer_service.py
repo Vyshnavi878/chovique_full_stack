@@ -789,7 +789,7 @@ class CustomerService:
     # Notifications
     # ==========================================================
 
-    async def get_user_notifications(self, user_id: str) -> list[SupportNotificationResponse]:
+    async def get_user_notifications(self, user_id: str, is_read: bool | None = None) -> list[SupportNotificationResponse]:
         # Optionally auto-generate expiring coupon notifications for the customer
         try:
             from app.services.coupon_service import CouponService
@@ -822,7 +822,7 @@ class CustomerService:
         except Exception as e:
             logger.debug(f"Coupon expiring notification check: {e}")
 
-        notifs = await self.notification_repo.get_user_notifications(user_id)
+        notifs = await self.notification_repo.get_user_notifications(user_id, is_read=is_read)
         res = []
         for n in notifs:
             title = n.title or (n.type.replace('_', ' ').title() if n.type else "Notification")
