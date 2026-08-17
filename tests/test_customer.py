@@ -16,9 +16,26 @@ from tests.conftest import TestSessionLocal
 pytestmark = pytest.mark.asyncio
 
 
+from sqlalchemy import select
+from app.models.coupon import Coupon
+
 async def _seed():
     async with TestSessionLocal() as session:
         await seed_database(session)
+        res = await session.execute(select(Coupon).where(Coupon.code == "CHOVIQUE10"))
+        if not res.scalar_one_or_none():
+            coupon = Coupon(
+                code="CHOVIQUE10",
+                name="Chovique 10",
+                description="10% off for test",
+                coupon_type="CUSTOMER",
+                discount_type="PERCENTAGE",
+                discount_percent=10.0,
+                discount_amount=0.0,
+                is_active=True,
+            )
+            session.add(coupon)
+            await session.commit()
 
 
 # ==========================================================
@@ -278,26 +295,49 @@ class TestSupportAndNotifications:
 
     async def test_notifications(self, authenticated_client: AsyncClient):
         # Create ticket triggers a notification
-        await authenticated_client.post(
+        ticket_res = await authenticated_client.post(
             "/api/v1/support/tickets",
             json={
                 "category": "Other",
                 "description": "General question.",
             },
         )
+        assert ticket_res.status_code == 201
 
+        # Check unread count
+        count_res = await authenticated_client.get("/api/v1/users/me/notifications/unread-count")
+        assert count_res.status_code == 200
+        assert count_res.json()["unread_count"] >= 1
+
+        # Get notification list
         res = await authenticated_client.get("/api/v1/users/me/notifications")
         assert res.status_code == 200
         notifs = res.json()
         assert len(notifs) >= 1
-        notif_id = notifs[0]["id"]
+        notif = notifs[0]
+        assert notif["title"] == "Support Ticket Submitted"
+        assert notif["is_read"] is False
+        assert notif["read"] is False
+        assert notif["type"] == "support"
+        notif_id = notif["id"]
 
-        # Mark read
+        # Mark single read
         read_res = await authenticated_client.patch(
             f"/api/v1/users/me/notifications/{notif_id}/read"
         )
         assert read_res.status_code == 200
         assert read_res.json()["read"] is True
+        assert read_res.json()["is_read"] is True
+
+        # Test read-all
+        read_all_res = await authenticated_client.post("/api/v1/users/me/notifications/read-all")
+        assert read_all_res.status_code == 200
+        assert "message" in read_all_res.json()
+
+        # Unread count should now be 0
+        count_after = await authenticated_client.get("/api/v1/users/me/notifications/unread-count")
+        assert count_after.status_code == 200
+        assert count_after.json()["unread_count"] == 0
 
         # Delete notification
         del_res = await authenticated_client.delete(

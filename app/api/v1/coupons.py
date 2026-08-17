@@ -1,8 +1,8 @@
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_user, get_current_user_optional, get_db
 from app.models.user import User
 from app.schemas.coupon import CouponValidationRequest, CouponValidationResponse, UserCouponResponse
 from app.services.coupon_service import CouponService
@@ -29,8 +29,10 @@ async def get_available_coupons(
 async def validate_coupon(
     payload: CouponValidationRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     service = CouponService(db)
-    return await service.validate_and_calculate_discount(current_user.id, payload.code)
+    user_id = current_user.id if current_user else "guest"
+    return await service.validate_and_calculate_discount(user_id, payload.code)
+
 

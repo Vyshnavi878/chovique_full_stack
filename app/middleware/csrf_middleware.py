@@ -15,6 +15,7 @@ CSRF_EXEMPT_PATHS = {
     "/api/v1/auth/resend-forgot-otp",
     "/api/v1/auth/reset-password",
     "/api/v1/auth/refresh",
+    "/api/v1/coupons/validate",
 }
 
 

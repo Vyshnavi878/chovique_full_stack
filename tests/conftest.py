@@ -183,6 +183,9 @@ async def authenticated_client(client: AsyncClient, mock_redis):
     )
 
     assert response.status_code == 200
+    csrf = response.cookies.get("csrf_token")
+    if csrf:
+        client.headers["x-csrf-token"] = csrf
 
     # The cookies are set on the client automatically
     yield client

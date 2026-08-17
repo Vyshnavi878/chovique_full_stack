@@ -129,7 +129,7 @@ class WalletService:
     ):
         if coins <= 0:
             return None
-        return await self.wallet_repo.add_transaction(
+        tx = await self.wallet_repo.add_transaction(
             user_id=user_id,
             transaction_type="REDEEM",
             coins=-abs(coins),
@@ -137,6 +137,24 @@ class WalletService:
             order_id=order_id,
             commit=commit,
         )
+
+        try:
+            from app.repositories.notification_repository import NotificationRepository
+            notif_repo = NotificationRepository(self.db)
+            await notif_repo.create(
+                user_id=user_id,
+                type="reward",
+                title="Reward Coins Redeemed",
+                message=f"You redeemed {abs(coins)} Reward Coins on your order.",
+                text=f"You redeemed {abs(coins)} Reward Coins on your order.",
+                related_entity_type="wallet",
+                related_entity_id=order_id,
+                reference_id=order_id,
+            )
+        except Exception as err:
+            logger.debug(f"Failed to create coin redeemed notification: {err}")
+
+        return tx
 
     async def earn_coins(
         self,
@@ -180,6 +198,23 @@ class WalletService:
             order_id=order_id,
             commit=commit,
         )
+
+        try:
+            from app.repositories.notification_repository import NotificationRepository
+            notif_repo = NotificationRepository(self.db)
+            await notif_repo.create(
+                user_id=user_id,
+                type="reward",
+                title="Reward Coins Earned",
+                message=f"You earned {coins_earned} Reward Coins from your order.",
+                text=f"You earned {coins_earned} Reward Coins from your order.",
+                related_entity_type="wallet",
+                related_entity_id=order_id,
+                reference_id=order_id,
+            )
+        except Exception as err:
+            logger.debug(f"Failed to create coin earned notification: {err}")
+
         return coins_earned, tx
 
     async def refund_order_coins(

@@ -11,21 +11,81 @@ class CouponRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    def _parse_expires_at(self, val):
+    def _parse_datetime(self, val, is_end_of_day: bool = False):
         if not val:
             return None
         if isinstance(val, datetime.datetime):
             return val if val.tzinfo else val.replace(tzinfo=timezone.utc)
+        if isinstance(val, datetime.date):
+            t = datetime.time(23, 59, 59) if is_end_of_day else datetime.time(0, 0, 0)
+            return datetime.datetime.combine(val, t, tzinfo=timezone.utc)
         if isinstance(val, str):
+            val_str = val.strip()
+            if not val_str:
+                return None
+            if val_str.endswith("Z") or val_str.endswith("z"):
+                val_str = val_str[:-1] + "+00:00"
+
+            # 1. Check DD-MM-YYYY (e.g. 01-09-2026)
+            import re
+            if re.match(r"^\d{2}-\d{2}-\d{4}$", val_str):
+                try:
+                    dt = datetime.datetime.strptime(val_str, "%d-%m-%Y")
+                    if is_end_of_day:
+                        dt = dt.replace(hour=23, minute=59, second=59)
+                    return dt.replace(tzinfo=timezone.utc)
+                except Exception:
+                    pass
+
+            # 2. Check DD/MM/YYYY (e.g. 01/09/2026)
+            if re.match(r"^\d{2}/\d{2}/\d{4}$", val_str):
+                try:
+                    dt = datetime.datetime.strptime(val_str, "%d/%m/%Y")
+                    if is_end_of_day:
+                        dt = dt.replace(hour=23, minute=59, second=59)
+                    return dt.replace(tzinfo=timezone.utc)
+                except Exception:
+                    pass
+
+            # 3. Check YYYY-MM-DD (e.g. 2026-09-01)
+            if re.match(r"^\d{4}-\d{2}-\d{2}$", val_str):
+                try:
+                    dt = datetime.datetime.strptime(val_str, "%Y-%m-%d")
+                    if is_end_of_day:
+                        dt = dt.replace(hour=23, minute=59, second=59)
+                    return dt.replace(tzinfo=timezone.utc)
+                except Exception:
+                    pass
+
+            # 4. Standard ISO format
             try:
-                val_str = val.strip()
-                if len(val_str) == 10:
-                    val_str += "T23:59:59+00:00"
                 dt = datetime.datetime.fromisoformat(val_str)
                 return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
             except Exception:
-                return None
+                pass
+
+            # 5. Common formats
+            for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y/%m/%d"):
+                try:
+                    dt = datetime.datetime.strptime(val_str, fmt)
+                    if is_end_of_day and fmt in ("%Y/%m/%d",):
+                        dt = dt.replace(hour=23, minute=59, second=59)
+                    return dt.replace(tzinfo=timezone.utc)
+                except Exception:
+                    continue
+
+            # 6. Fallback with dateutil
+            try:
+                from dateutil import parser
+                dt = parser.parse(val_str, dayfirst=True)
+                return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+            except Exception:
+                pass
+
         return None
+
+    def _parse_expires_at(self, val):
+        return self._parse_datetime(val, is_end_of_day=True)
 
     def _check_and_deactivate(self, coupon: Coupon) -> bool:
         if coupon and coupon.expires_at:
@@ -91,7 +151,7 @@ class CouponRepository:
         if "expires_at" in kwargs and kwargs["expires_at"]:
             kwargs["expires_at"] = self._parse_expires_at(kwargs["expires_at"])
         if "start_at" in kwargs and kwargs["start_at"]:
-            kwargs["start_at"] = self._parse_expires_at(kwargs["start_at"])
+            kwargs["start_at"] = self._parse_datetime(kwargs["start_at"], is_end_of_day=False)
 
         eligibility_rule = kwargs.pop("eligibility_rule", None)
         eligibility_value = kwargs.pop("eligibility_value", None)
@@ -134,7 +194,7 @@ class CouponRepository:
         if "expires_at" in kwargs and kwargs["expires_at"]:
             kwargs["expires_at"] = self._parse_expires_at(kwargs["expires_at"])
         if "start_at" in kwargs and kwargs["start_at"]:
-            kwargs["start_at"] = self._parse_expires_at(kwargs["start_at"])
+            kwargs["start_at"] = self._parse_datetime(kwargs["start_at"], is_end_of_day=False)
 
         kwargs.pop("eligibility_rule", None)
         kwargs.pop("eligibility_value", None)

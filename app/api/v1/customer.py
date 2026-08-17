@@ -189,6 +189,36 @@ async def get_notifications(
     return await service.get_user_notifications(current_user.id)
 
 
+@router.get(
+    "/notifications/unread-count",
+    summary="Get unread notification count for authenticated user",
+)
+async def get_unread_notification_count(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = CustomerService(db)
+    count = await service.get_user_unread_count(current_user.id)
+    return {"unread_count": count}
+
+
+@router.post(
+    "/notifications/read-all",
+    summary="Mark all notifications as read for authenticated user",
+)
+@router.patch(
+    "/notifications/read-all",
+    summary="Mark all notifications as read for authenticated user",
+)
+async def mark_all_notifications_read(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = CustomerService(db)
+    count = await service.mark_all_notifications_read(current_user.id)
+    return {"message": "All notifications marked as read.", "updated_count": count}
+
+
 @router.patch(
     "/notifications/{notification_id}/read",
     response_model=SupportNotificationResponse,

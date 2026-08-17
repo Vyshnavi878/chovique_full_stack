@@ -439,7 +439,7 @@ class CustomerService:
             )
             order.coins_earned = coins_earned
 
-            if payload.coupon_code and coupon_discount > 0:
+            if payload.coupon_code:
                 from app.models.coupon import CouponUsage
                 coupon = await self.coupon_repo.get_by_code(payload.coupon_code)
                 if coupon:
@@ -447,7 +447,7 @@ class CustomerService:
                         coupon_id=coupon.id,
                         user_id=user_id,
                         order_id=order.id,
-                        discount_amount=coupon_discount
+                        discount_amount=coupon_discount or 0.0
                     ))
 
             # Clean up ordered items from database Cart & Wishlist tables
@@ -655,24 +655,23 @@ class CustomerService:
             return None
         return self._format_ticket_response(ticket)
 
-    async def create_ticket(
-        self,
-        user: User,
-        payload: CreateTicketPayload,
-    ) -> SupportTicketResponse:
+    async def create_ticket(self, user: User | str, payload: CreateTicketPayload) -> SupportTicketResponse:
+        user_obj = user if isinstance(user, User) else await self.user_repo.get_by_id(user)
+        if not user_obj:
+            raise ValueError("User not found.")
 
-        order_id_val = payload.order_id or payload.orderId
+        order_id_val = getattr(payload, "order_id", None) or getattr(payload, "orderId", None)
         linked_order_id = None
         if order_id_val and str(order_id_val).strip():
             clean_oid = str(order_id_val).strip()
             order = await self.order_repo.get_by_id(clean_oid)
-            if not order or order.user_id != user.id:
+            if not order or order.user_id != user_obj.id:
                 raise ValueError("Selected order does not belong to you or does not exist.")
             linked_order_id = order.id
 
         ticket = await self.ticket_repo.create(
-            customer_id=user.id,
-            customer_name=user.full_name,
+            customer_id=user_obj.id,
+            customer_name=user_obj.full_name,
             category=payload.category,
             description=payload.description,
             order_id=linked_order_id,
@@ -681,17 +680,21 @@ class CustomerService:
 
         # Create confirmation notification for customer
         await self.notification_repo.create(
-            user_id=user.id,
-            text=f"Support ticket #{ticket.id} received. Our team will update you shortly.",
+            user_id=user_obj.id,
             type="support",
+            title="Support Ticket Submitted",
+            message=f"Support ticket #{ticket.id} received. Our team will update you shortly.",
+            text=f"Support ticket #{ticket.id} received. Our team will update you shortly.",
+            related_entity_type="support",
+            related_entity_id=ticket.id,
             reference_id=ticket.id,
         )
 
         try:
             from app.integrations.resend import resend_email
             await resend_email.send_ticket_created(
-                email=user.email,
-                name=user.full_name,
+                email=user_obj.email,
+                name=user_obj.full_name,
                 ticket_id=ticket.id,
                 category=ticket.category,
                 description=ticket.description,
@@ -708,18 +711,18 @@ class CustomerService:
 
         # Security check: User must own the ticket (or be Admin)
         if user.role not in ["admin", "superadmin"] and ticket.customer_id != user.id:
-            raise ValueError("Access denied to this support ticket.")
+            raise ValueError("Unauthorized access to ticket order details.")
 
         if not ticket.order_id:
-            raise ValueError("No related order linked to this support ticket.")
+            raise ValueError("No order is associated with this support ticket.")
 
         order = await self.order_repo.get_by_id(ticket.order_id)
         if not order:
-            raise ValueError("Related order not found.")
+            raise ValueError(f"Associated order '{ticket.order_id}' not found.")
 
         # Security check: User must own the order (or be Admin)
         if user.role not in ["admin", "superadmin"] and order.user_id != user.id:
-            raise ValueError("Related order does not belong to you.")
+            raise ValueError("Unauthorized access to order details.")
 
         return self._format_order_response(order)
 
@@ -727,15 +730,41 @@ class CustomerService:
         self,
         ticket_id: str,
         user_id: str,
-        payload: TicketFeedbackPayload,
-    ) -> SupportTicketResponse | None:
-
+        feedback: str
+    ) -> SupportTicketResponse:
+        """Customer submits feedback on resolution satisfaction (Satisfied/Unsatisfied)."""
         ticket = await self.ticket_repo.get_by_id(ticket_id)
-        if not ticket or ticket.customer_id != user_id:
-            return None
+        if not ticket:
+            raise ValueError("Support ticket not found.")
 
-        updated = await self.ticket_repo.update_feedback(ticket_id, payload.feedback)
-        return self._format_ticket_response(updated)
+        if ticket.customer_id != user_id:
+            raise ValueError("Unauthorized to provide feedback for this ticket.")
+
+        if ticket.status != "Resolved":
+            raise ValueError("Feedback can only be provided for resolved support tickets.")
+
+        ticket.customer_resolution_feedback = feedback
+        await self.db.commit()
+        await self.db.refresh(ticket)
+        return self._format_ticket_response(ticket)
+
+    async def acknowledge_ticket_notification(
+        self,
+        ticket_id: str,
+        user_id: str
+    ) -> SupportTicketResponse:
+        """Acknowledge ticket notification and clear notified badge on ticket."""
+        ticket = await self.ticket_repo.get_by_id(ticket_id)
+        if not ticket:
+            raise ValueError("Support ticket not found.")
+
+        if ticket.customer_id != user_id:
+            raise ValueError("Unauthorized to update this ticket.")
+
+        ticket.notified = True
+        await self.db.commit()
+        await self.db.refresh(ticket)
+        return self._format_ticket_response(ticket)
 
     def _format_ticket_response(self, ticket) -> SupportTicketResponse:
         created_date = ticket.created_at.strftime("%Y-%m-%d") if ticket.created_at else datetime.now().strftime("%Y-%m-%d")
@@ -761,32 +790,95 @@ class CustomerService:
     # ==========================================================
 
     async def get_user_notifications(self, user_id: str) -> list[SupportNotificationResponse]:
+        # Optionally auto-generate expiring coupon notifications for the customer
+        try:
+            from app.services.coupon_service import CouponService
+            coupon_svc = CouponService(self.db)
+            available_coupons = await coupon_svc.get_available_coupons(user_id)
+            from datetime import timezone
+            now_utc = datetime.now(timezone.utc)
+            for c in available_coupons:
+                if c.expires_at:
+                    exp_dt = c.expires_at if c.expires_at.tzinfo else c.expires_at.replace(tzinfo=timezone.utc)
+                    days_left = (exp_dt - now_utc).days
+                    if 0 <= days_left <= 14:
+                        date_str = exp_dt.strftime("%d-%m-%Y")
+                        existing_notifs = await self.notification_repo.get_user_notifications(user_id)
+                        already_notified = any(
+                            n.type == "coupon" and n.reference_id == c.code
+                            for n in existing_notifs
+                        )
+                        if not already_notified:
+                            await self.notification_repo.create(
+                                user_id=user_id,
+                                type="coupon",
+                                title="Coupon Expiring Soon",
+                                message=f"Your {c.code} coupon expires on {date_str}.",
+                                text=f"Your {c.code} coupon expires on {date_str}.",
+                                related_entity_type="coupon",
+                                related_entity_id=c.code,
+                                reference_id=c.code,
+                            )
+        except Exception as e:
+            logger.debug(f"Coupon expiring notification check: {e}")
+
         notifs = await self.notification_repo.get_user_notifications(user_id)
-        return [
-            SupportNotificationResponse(
-                id=n.id,
-                text=n.text,
-                date=n.created_at.strftime("%Y-%m-%d") if n.created_at else datetime.now().strftime("%Y-%m-%d"),
-                read=n.read,
-                type=n.type,
-                referenceId=n.reference_id,
+        res = []
+        for n in notifs:
+            title = n.title or (n.type.replace('_', ' ').title() if n.type else "Notification")
+            msg = n.message or n.text or ""
+            txt = n.text or n.message or title
+            is_read_flag = bool(n.is_read or n.read)
+            date_str = n.created_at.strftime("%d %b %Y") if n.created_at else datetime.now().strftime("%d %b %Y")
+            res.append(
+                SupportNotificationResponse(
+                    id=n.id,
+                    title=title,
+                    message=msg,
+                    text=txt,
+                    date=date_str,
+                    read=is_read_flag,
+                    is_read=is_read_flag,
+                    type=n.type or "general",
+                    referenceId=n.reference_id or n.related_entity_id,
+                    related_entity_type=n.related_entity_type,
+                    related_entity_id=n.related_entity_id or n.reference_id,
+                    created_at=n.created_at,
+                )
             )
-            for n in notifs
-        ]
+        return res
+
+    async def get_user_unread_count(self, user_id: str) -> int:
+        return await self.notification_repo.get_user_unread_count(user_id)
 
     async def mark_notification_read(self, user_id: str, notification_id: str) -> SupportNotificationResponse | None:
         notif = await self.notification_repo.mark_read(notification_id, user_id)
         if not notif:
             return None
 
+        title = notif.title or (notif.type.replace('_', ' ').title() if notif.type else "Notification")
+        msg = notif.message or notif.text or ""
+        txt = notif.text or notif.message or title
+        is_read_flag = bool(notif.is_read or notif.read)
+        date_str = notif.created_at.strftime("%d %b %Y") if notif.created_at else datetime.now().strftime("%d %b %Y")
+
         return SupportNotificationResponse(
             id=notif.id,
-            text=notif.text,
-            date=notif.created_at.strftime("%Y-%m-%d") if notif.created_at else datetime.now().strftime("%Y-%m-%d"),
-            read=notif.read,
-            type=notif.type,
-            referenceId=notif.reference_id,
+            title=title,
+            message=msg,
+            text=txt,
+            date=date_str,
+            read=is_read_flag,
+            is_read=is_read_flag,
+            type=notif.type or "general",
+            referenceId=notif.reference_id or notif.related_entity_id,
+            related_entity_type=notif.related_entity_type,
+            related_entity_id=notif.related_entity_id or notif.reference_id,
+            created_at=notif.created_at,
         )
+
+    async def mark_all_notifications_read(self, user_id: str) -> int:
+        return await self.notification_repo.mark_user_read_all(user_id)
 
     async def delete_notification(self, user_id: str, notification_id: str) -> bool:
         return await self.notification_repo.delete(notification_id, user_id)

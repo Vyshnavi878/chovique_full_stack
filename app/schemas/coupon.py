@@ -57,6 +57,8 @@ class CouponCreate(BaseModel):
     applicability: str = "ENTIRE_STORE"
     applicable_ids: List[str] = []
 
+    model_config = ConfigDict(extra="allow")
+
     @field_validator("start_at", "expires_at", mode="before")
     @classmethod
     def clean_empty_date_strings(cls, v):
@@ -106,6 +108,8 @@ class CouponUpdate(BaseModel):
     
     applicability: Optional[str] = None
     applicable_ids: Optional[List[str]] = None
+
+    model_config = ConfigDict(extra="allow")
 
 
 class CouponAdminResponse(BaseModel):

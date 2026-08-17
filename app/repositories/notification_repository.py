@@ -38,6 +38,27 @@ class NotificationRepository:
         await self.db.commit()
         return await self.get_by_id(notification_id)
 
+    async def get_user_unread_count(self, user_id: str) -> int:
+        query = select(func.count(Notification.id)).where(
+            Notification.user_id == user_id,
+            (Notification.is_read == False) & (Notification.read == False)
+        )
+        result = await self.db.execute(query)
+        return result.scalar() or 0
+
+    async def mark_user_read_all(self, user_id: str) -> int:
+        stmt = (
+            update(Notification)
+            .where(
+                Notification.user_id == user_id,
+                (Notification.is_read == False) | (Notification.read == False)
+            )
+            .values(is_read=True, read=True)
+        )
+        res = await self.db.execute(stmt)
+        await self.db.commit()
+        return res.rowcount
+
     async def delete(self, notification_id: str, user_id: str) -> bool:
         result = await self.db.execute(
             delete(Notification)

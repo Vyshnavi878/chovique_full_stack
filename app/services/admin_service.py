@@ -687,6 +687,38 @@ class AdminService:
             ),
         )
 
+        # -- In-App notification for customer --
+        try:
+            from app.repositories.notification_repository import NotificationRepository
+            notif_repo = NotificationRepository(self.db)
+            notif_title = f"Order {new_status}"
+            notif_msg = f"Your order #{order.id} has been {new_status.lower()}."
+            if new_status == "Confirmed":
+                notif_title = "Order Confirmed"
+                notif_msg = f"Your order #{order.id} has been confirmed."
+            elif new_status == "Shipped":
+                notif_title = "Order Shipped"
+                notif_msg = f"Your order #{order.id} has been shipped."
+            elif new_status == "Delivered":
+                notif_title = "Order Delivered"
+                notif_msg = f"Your order #{order.id} has been delivered."
+            elif new_status == "Cancelled":
+                notif_title = "Order Cancelled"
+                notif_msg = f"Your order #{order.id} has been cancelled."
+
+            await notif_repo.create(
+                user_id=order.user_id,
+                type="order",
+                title=notif_title,
+                message=notif_msg,
+                text=notif_msg,
+                related_entity_type="order",
+                related_entity_id=order.id,
+                reference_id=order.id,
+            )
+        except Exception as notif_err:
+            logger.warning("Failed to create in-app order notification for %s: %s", order_id, notif_err)
+
         # -- Email notifications (best-effort, never block the response) --
         try:
             user = await self.user_repo.get_by_id(order.user_id)
@@ -918,10 +950,10 @@ class AdminService:
 
     async def get_customer_orders(self, customer_id: str, page: int = 1, limit: int = 20):
         user = await self.user_repo.get_by_id(customer_id)
-        if not user or user.role != "customer":
+        if not user:
             raise ValueError("Customer not found.")
 
-        orders = await self.order_repo.get_user_orders(customer_id)
+        orders = await self.order_repo.get_user_orders(user.id)
         from app.services.customer_service import CustomerService
         cs = CustomerService(self.db)
         formatted = [cs._format_order_response(o) for o in orders]
@@ -941,12 +973,12 @@ class AdminService:
 
     async def get_customer_support(self, customer_id: str):
         user = await self.user_repo.get_by_id(customer_id)
-        if not user or user.role != "customer":
+        if not user:
             raise ValueError("Customer not found.")
 
         result_tickets = await self.db.execute(
             select(SupportTicket)
-            .where(SupportTicket.customer_id == customer_id)
+            .where(SupportTicket.customer_id == user.id)
             .order_by(SupportTicket.created_at.desc())
         )
         tickets = result_tickets.scalars().all()
@@ -956,7 +988,7 @@ class AdminService:
 
     async def get_customer_coins(self, customer_id: str) -> CustomerCoinsResponse:
         user = await self.user_repo.get_by_id(customer_id)
-        if not user or user.role != "customer":
+        if not user:
             raise ValueError("Customer not found.")
 
         from app.repositories.wallet_repository import WalletRepository
@@ -965,14 +997,14 @@ class AdminService:
         wallet_repo = WalletRepository(self.db)
         wallet_svc = WalletService(self.db)
 
-        wallet = await wallet_repo.get_or_create_wallet(customer_id)
+        wallet = await wallet_repo.get_or_create_wallet(user.id)
         settings = await wallet_svc.get_reward_settings()
-        txs = await wallet_repo.get_transactions(customer_id, limit=50)
+        txs = await wallet_repo.get_transactions(user.id, limit=50)
 
         rupee_val = round(wallet.coin_balance / settings.coins_per_rupee, 2) if settings.coins_per_rupee > 0 else 0.0
 
         return CustomerCoinsResponse(
-            customer_id=customer_id,
+            customer_id=user.id,
             customer_name=user.full_name,
             coin_balance=wallet.coin_balance,
             rupee_value=rupee_val,
@@ -989,38 +1021,37 @@ class AdminService:
         )
 
     async def get_customer_details(self, user_id: str) -> CustomerDetailsResponse:
-        from sqlalchemy.orm import selectinload
-        from app.models.order import OrderItem
         from app.repositories.wallet_repository import WalletRepository
 
         user = await self.user_repo.get_by_id(user_id)
-        if not user or user.role != "customer":
+        if not user:
             raise ValueError("Customer not found.")
 
-        result_orders = await self.db.execute(
-            select(Order)
-            .options(
-                selectinload(Order.items).selectinload(OrderItem.product)
-            )
-            .where(Order.user_id == user_id)
-            .order_by(Order.created_at.desc())
-        )
-        orders = result_orders.scalars().all()
+        # Query orders using the same relationship and method as customer directory
+        orders = await self.order_repo.get_user_orders(user.id)
+        if not orders and user_id != user.id:
+            orders = await self.order_repo.get_user_orders(user_id)
 
-        result_tickets = await self.db.execute(select(SupportTicket).where(SupportTicket.customer_id == user_id).order_by(SupportTicket.created_at.desc()))
-        tickets = result_tickets.scalars().all()
+        result_tickets = await self.db.execute(
+            select(SupportTicket)
+            .where(SupportTicket.customer_id == user.id)
+            .order_by(SupportTicket.created_at.desc())
+        )
+        tickets = list(result_tickets.scalars().all())
 
         wallet_repo = WalletRepository(self.db)
-        wallet = await wallet_repo.get_or_create_wallet(user_id)
+        wallet = await wallet_repo.get_or_create_wallet(user.id)
 
         from app.schemas.user import UserResponse
         from app.services.customer_service import CustomerService
 
         cs = CustomerService(self.db)
+        non_cancelled = [o for o in orders if getattr(o, 'status', '') != 'Cancelled']
+        spent = sum(o.total for o in non_cancelled)
 
         return CustomerDetailsResponse(
             user=UserResponse.from_orm_user(user),
-            total_spent=sum(o.total for o in orders if getattr(o, 'status', '') != 'Cancelled'),
+            total_spent=spent,
             total_orders=len(orders),
             reward_coins=wallet.coin_balance if wallet else 0,
             joined_date=user.created_at.strftime("%b %Y") if user.created_at else "",
@@ -1030,7 +1061,7 @@ class AdminService:
 
     async def update_customer(self, user_id: str, payload: CustomerUpdatePayload, admin_id: str):
         user = await self.user_repo.get_by_id(user_id)
-        if not user or user.role != "customer":
+        if not user:
             raise ValueError("Customer account not found.")
 
         changes = []
@@ -1466,9 +1497,9 @@ class AdminService:
             if method not in ["Cash", "Card", "UPI", "Bank Transfer"]:
                 raise ValueError(f"Invalid payment method '{method}'. Supported methods: Cash, Card, UPI, Bank Transfer.")
 
-            p_status = (payload.payment_status or "Paid").strip()
-            if p_status not in ["Paid", "Pending"]:
-                p_status = "Paid"
+            p_status = (payload.payment_status or "").strip()
+            if not p_status or p_status not in ["Paid", "Pending"]:
+                raise ValueError("Payment Status is required and must be either 'Paid' or 'Pending'.")
 
             rec_amt = None
             rec_num = None
@@ -1512,7 +1543,7 @@ class AdminService:
                 acc_holder = payload.account_holder.strip()
                 txn_id = payload.transaction_id.strip()
 
-            # 2. Database transaction & stock deduction
+            # 2. Database transaction (inventory stock is NOT deducted for offline sales)
             subtotal = 0.0
             sale_items = []
 
@@ -1524,18 +1555,9 @@ class AdminService:
                 if not product:
                     raise ValueError(f"Product with ID '{item_data.product_id}' not found.")
 
-                if (product.stock or 0) < item_data.quantity:
-                    raise ValueError(
-                        f"Insufficient stock for '{product.name}'. Available stock: {product.stock or 0}, Requested: {item_data.quantity}"
-                    )
-
                 unit_price = float(product.price or 0.0)
                 line_total = round(unit_price * item_data.quantity, 2)
                 subtotal += line_total
-
-                # Deduct stock from database
-                new_stock = (product.stock or 0) - item_data.quantity
-                await self.product_repo.update(product.id, stock=new_stock)
 
                 sale_items.append({
                     "product_id": product.id,
@@ -1546,14 +1568,9 @@ class AdminService:
                     "line_total": line_total,
                 })
 
-            discount = max(0.0, float(payload.discount or 0.0))
-            tax = max(0.0, float(payload.tax or 0.0))
-            total_amount = round(max(0.0, subtotal - discount + tax), 2)
-
-            # Unique receipt_id
-            now_str = datetime.now().strftime("%Y%m%d")
-            rand_hex = uuid.uuid4().hex[:6].upper()
-            receipt_id = f"OFF-{now_str}-{rand_hex}"
+            # Generate sequential Receipt Number (REC-YYYY-000001)
+            receipt_number = await self.offline_sale_repo.generate_next_receipt_number()
+            receipt_id = receipt_number
 
             # Create OfflineSale DB record
             sale = OfflineSale(
@@ -1571,7 +1588,7 @@ class AdminService:
                 status=p_status,
                 payment_status=p_status,
                 received_amount=rec_amt,
-                receipt_number=rec_num,
+                receipt_number=receipt_number,
                 card_type=c_type,
                 card_last4=c_last4,
                 transaction_id=txn_id,
@@ -1610,8 +1627,8 @@ class AdminService:
                 raise ValueError("Quantity must be a positive integer.")
 
             tot_price = payload.total_price if payload.total_price is not None else 0.0
-            now_str = datetime.now().strftime("%Y%m%d")
-            receipt_id = f"OFF-{now_str}-{uuid.uuid4().hex[:6].upper()}"
+            receipt_number = await self.offline_sale_repo.generate_next_receipt_number()
+            receipt_id = receipt_number
 
             sale = OfflineSale(
                 receipt_id=receipt_id,
@@ -1626,6 +1643,9 @@ class AdminService:
                 tax=0.0,
                 total_amount=tot_price,
                 status="Completed",
+                payment_status="Paid",
+                received_amount=tot_price if (payload.payment_method or "Cash") == "Cash" else None,
+                receipt_number=receipt_number,
                 product_name=payload.product_name,
                 quantity=payload.quantity,
                 total_price=tot_price,

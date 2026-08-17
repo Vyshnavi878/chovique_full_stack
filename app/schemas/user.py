@@ -40,9 +40,14 @@ class ProfileUpdatePayload(BaseModel):
     def validate_phone(cls, v):
         if v is not None and str(v).strip():
             s = str(v).strip()
-            if not re.match(r"^[6-9]\d{9}$", s):
+            cleaned = re.sub(r"\D", "", s)
+            if cleaned.startswith("91") and len(cleaned) == 12:
+                cleaned = cleaned[2:]
+            elif cleaned.startswith("0") and len(cleaned) == 11:
+                cleaned = cleaned[1:]
+            if not re.match(r"^[6-9]\d{9}$", cleaned):
                 raise ValueError("Phone number must be a valid 10-digit Indian number starting with 6, 7, 8, or 9.")
-            return s
+            return cleaned
         return v
 
 
@@ -331,9 +336,14 @@ class CustomerAddressUpdate(BaseModel):
     def validate_phone(cls, v):
         if v is not None and str(v).strip():
             s = str(v).strip()
-            if not re.match(r"^[6-9]\d{9}$", s):
+            cleaned = re.sub(r"\D", "", s)
+            if cleaned.startswith("91") and len(cleaned) == 12:
+                cleaned = cleaned[2:]
+            elif cleaned.startswith("0") and len(cleaned) == 11:
+                cleaned = cleaned[1:]
+            if not re.match(r"^[6-9]\d{9}$", cleaned):
                 raise ValueError("Phone number must be a valid 10-digit Indian number starting with 6, 7, 8, or 9.")
-            return s
+            return cleaned
         return v
 
 
@@ -357,10 +367,16 @@ class CustomerAddressResponse(BaseModel):
 
 class SupportNotificationResponse(BaseModel):
     id: str
+    title: Optional[str] = None
+    message: Optional[str] = None
     text: str
     date: str
     read: bool
+    is_read: Optional[bool] = None
     type: str = "general"
     referenceId: Optional[str] = None
+    related_entity_type: Optional[str] = None
+    related_entity_id: Optional[str] = None
+    created_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)

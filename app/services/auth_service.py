@@ -168,12 +168,12 @@ class AuthService:
         # Grant Welcome Coins
         from app.services.wallet_service import WalletService
         wallet_service = WalletService(self.db)
-        settings = await wallet_service.get_reward_settings()
-        if settings.reward_system_enabled and settings.welcome_coins > 0:
+        reward_settings = await wallet_service.get_reward_settings()
+        if reward_settings.reward_system_enabled and reward_settings.welcome_coins > 0:
             await wallet_service.wallet_repo.add_transaction(
                 user_id=str(user.id),
                 transaction_type="EARN",
-                coins=settings.welcome_coins,
+                coins=reward_settings.welcome_coins,
                 description="Welcome Bonus",
                 commit=True
             )
