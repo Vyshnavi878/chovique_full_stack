@@ -213,6 +213,26 @@ class AuthService:
 
         logger.info("User registered successfully: id=%s email=%s", user.id, email)
 
+        try:
+            from app.repositories.notification_repository import NotificationRepository
+            await NotificationRepository(self.db).create(
+                user_id=user.id,
+                type="welcome",
+                title="Welcome to Chovique Chocolatier ✨",
+                message=f"Welcome {user.full_name or 'Friend'}! Thank you for creating an account with us. Enjoy 100 bonus Welcome Coins!",
+                text=f"Welcome {user.full_name or 'Friend'}! Thank you for creating an account with us.",
+                related_entity_type="user",
+                related_entity_id=user.id,
+            )
+        except Exception as notif_err:
+            logger.warning("Failed to create welcome notification: %s", notif_err)
+
+        try:
+            from app.integrations.resend import resend_email
+            await resend_email.send_welcome(email=user.email, name=user.full_name or "Chocolate Lover")
+        except Exception as email_err:
+            logger.warning("Failed to send welcome email: %s", email_err)
+
         return {
 
             "message": "Registration successful.",
@@ -273,7 +293,7 @@ class AuthService:
         attempts_key = f"login_attempts:{request.email.lower()}"
 
         try:
-            from app.core.redis import redis_client
+            from app.db.redis import redis_client
             is_locked = await redis_client.get(lockout_key)
             if is_locked:
                 ttl = await redis_client.ttl(lockout_key)
@@ -290,13 +310,27 @@ class AuthService:
             user.hashed_password,
         ):
             try:
-                from app.core.redis import redis_client
+                from app.db.redis import redis_client
                 attempts = await redis_client.incr(attempts_key)
                 await redis_client.expire(attempts_key, 3600)
                 if attempts >= ps.max_login_attempts:
                     lockout_secs = ps.account_lockout_duration * 60
                     await redis_client.setex(lockout_key, lockout_secs, "locked")
                     await redis_client.delete(attempts_key)
+
+                    try:
+                        from datetime import datetime
+                        from app.integrations.resend import resend_email
+                        await resend_email.send_superadmin_security_alert(
+                            super_admin_email="superadmin@chovique.com",
+                            super_admin_name="Super Admin",
+                            admin_email=request.email,
+                            security_event=f"Account locked after {ps.max_login_attempts} failed login attempts.",
+                            detected_at=datetime.now().strftime("%d %b %Y, %I:%M %p"),
+                        )
+                    except Exception:
+                        pass
+
                     raise ValueError(f"Too many failed login attempts. Account locked for {ps.account_lockout_duration} minutes.")
             except ValueError:
                 raise
@@ -309,7 +343,7 @@ class AuthService:
 
         # Success: clear lockout counters
         try:
-            from app.core.redis import redis_client
+            from app.db.redis import redis_client
             await redis_client.delete(attempts_key)
             await redis_client.delete(lockout_key)
         except Exception:

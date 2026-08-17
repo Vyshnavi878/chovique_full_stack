@@ -76,7 +76,7 @@ class RefundService:
         order.payment_status = "Refunded" if refund_amount >= order.total else "Partially Refunded"
         await self.db.commit()
 
-        # Send refund notification email
+        # Send refund notification email & in-app notification
         user = await self.user_repo.get_by_id(order.user_id)
         if user:
             await resend_email.send_refund_notification(
@@ -85,6 +85,28 @@ class RefundService:
                 order_id=order.id,
                 amount=refund_amount,
             )
+            try:
+                from app.repositories.notification_repository import NotificationRepository
+                notif_repo = NotificationRepository(self.db)
+                await notif_repo.create(
+                    user_id=order.user_id,
+                    type="refund",
+                    title="Refund Processed",
+                    message=f"A refund of ₹{refund_amount:,.2f} for Order #{order.id} has been issued.",
+                    text=f"A refund of ₹{refund_amount:,.2f} for Order #{order.id} has been issued.",
+                    related_entity_type="order",
+                    related_entity_id=order.id,
+                    reference_id=order.id,
+                )
+            except Exception as notif_err:
+                logger.warning("Failed to create customer in-app refund notification: %s", notif_err)
+
+        # Notify Admin
+        try:
+            from app.services.notification_service import NotificationService
+            await NotificationService(self.db).notify_refund_completed(order_id=order.id, amount=refund_amount)
+        except Exception as admin_notif_err:
+            logger.warning("Failed to create admin refund notification: %s", admin_notif_err)
 
         return RefundResponseSchema.model_validate(refund)
 

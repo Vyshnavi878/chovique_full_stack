@@ -167,13 +167,16 @@ class ProductService:
             **update_data,
         )
 
-        if product and product.stock is not None and product.stock <= 10:
+        if product and product.stock is not None:
             try:
                 from app.services.notification_service import NotificationService
                 notif_svc = NotificationService(self.db)
-                await notif_svc.notify_low_stock(product.id, product.name, product.stock)
+                if product.stock == 0:
+                    await notif_svc.notify_out_of_stock(product.id, product.name)
+                elif product.stock <= 10:
+                    await notif_svc.notify_low_stock(product.id, product.name, product.stock)
             except Exception as exc:
-                logger.error("Failed to trigger low stock notification on update: %s", exc)
+                logger.error("Failed to trigger stock notification on update: %s", exc)
 
         logger.info("Product updated: id=%s", product_id)
 

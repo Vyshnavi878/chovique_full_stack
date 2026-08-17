@@ -181,4 +181,155 @@ class NotificationService:
         except Exception as e:
             logger.error("Failed to create support_message notification: %s", e)
 
+    async def notify_payment_success(self, order_id: str, order_number: str, amount: float, commit: bool = True):
+        """Notification type: payment_success"""
+        try:
+            title = "Payment Successful"
+            message = f"Payment of ₹{amount:,.2f} received for Order #{order_number}."
+            await self.repo.create_admin_notification_if_not_exists(
+                admin_id=None,
+                type="payment_success",
+                title=title,
+                message=message,
+                related_entity_type="order",
+                related_entity_id=order_id,
+                commit=commit
+            )
+        except Exception as e:
+            logger.error("Failed to create payment_success notification: %s", e)
+
+    async def notify_order_cancelled(self, order_id: str, order_number: str, reason: str = "", commit: bool = True):
+        """Notification type: order_cancelled"""
+        try:
+            title = "Order Cancelled"
+            message = f"Order #{order_number} has been cancelled."
+            if reason:
+                message += f" ({reason})"
+            await self.repo.create_admin_notification_if_not_exists(
+                admin_id=None,
+                type="order_cancelled",
+                title=title,
+                message=message,
+                related_entity_type="order",
+                related_entity_id=order_id,
+                commit=commit
+            )
+        except Exception as e:
+            logger.error("Failed to create order_cancelled notification: %s", e)
+
+    async def notify_refund_initiated(self, order_id: str, amount: float, commit: bool = True):
+        """Notification type: refund_initiated"""
+        try:
+            title = "Refund Initiated"
+            message = f"Refund of ₹{amount:,.2f} initiated for Order #{order_id}."
+            await self.repo.create_admin_notification_if_not_exists(
+                admin_id=None,
+                type="refund_initiated",
+                title=title,
+                message=message,
+                related_entity_type="order",
+                related_entity_id=order_id,
+                commit=commit
+            )
+        except Exception as e:
+            logger.error("Failed to create refund_initiated notification: %s", e)
+
+    async def notify_refund_completed(self, order_id: str, amount: float, commit: bool = True):
+        """Notification type: refund_completed"""
+        try:
+            title = "Refund Completed"
+            message = f"Refund of ₹{amount:,.2f} completed for Order #{order_id}."
+            await self.repo.create_admin_notification_if_not_exists(
+                admin_id=None,
+                type="refund_completed",
+                title=title,
+                message=message,
+                related_entity_type="order",
+                related_entity_id=order_id,
+                commit=commit
+            )
+        except Exception as e:
+            logger.error("Failed to create refund_completed notification: %s", e)
+
+    async def notify_out_of_stock(self, product_id: str, product_name: str, commit: bool = True):
+        """Notification type: out_of_stock"""
+        try:
+            title = "Out of Stock Alert"
+            message = f"{product_name} is currently out of stock!"
+            await self.repo.create_admin_notification_if_not_exists(
+                admin_id=None,
+                type="out_of_stock",
+                title=title,
+                message=message,
+                related_entity_type="product",
+                related_entity_id=product_id,
+                commit=commit
+            )
+        except Exception as e:
+            logger.error("Failed to create out_of_stock notification: %s", e)
+
+    async def notify_new_offline_sale(self, receipt_number: str, total_amount: float, commit: bool = True):
+        """Notification type: offline_sale"""
+        try:
+            title = "New Offline Sale Registered"
+            message = f"Receipt #{receipt_number} for ₹{total_amount:,.2f} recorded."
+            await self.repo.create_admin_notification_if_not_exists(
+                admin_id=None,
+                type="offline_sale",
+                title=title,
+                message=message,
+                related_entity_type="offline_sale",
+                related_entity_id=receipt_number,
+                commit=commit
+            )
+        except Exception as e:
+            logger.error("Failed to create offline_sale notification: %s", e)
+
+    async def notify_offline_sale_update(self, receipt_number: str, action: str = "updated", commit: bool = True):
+        """Notification type: offline_sale_update"""
+        try:
+            title = f"Offline Sale {action.capitalize()}"
+            message = f"Offline receipt #{receipt_number} was {action}."
+            await self.repo.create_admin_notification_if_not_exists(
+                admin_id=None,
+                type="offline_sale_update",
+                title=title,
+                message=message,
+                related_entity_type="offline_sale",
+                related_entity_id=receipt_number,
+                commit=commit
+            )
+        except Exception as e:
+            logger.error("Failed to create offline_sale_update notification: %s", e)
+
+    async def notify_product_alert(self, product_id: str, title: str, message: str, commit: bool = True):
+        """Notification type: product_alert"""
+        try:
+            await self.repo.create_admin_notification_if_not_exists(
+                admin_id=None,
+                type="product_alert",
+                title=title,
+                message=message,
+                related_entity_type="product",
+                related_entity_id=product_id,
+                commit=commit
+            )
+        except Exception as e:
+            logger.error("Failed to create product_alert notification: %s", e)
+
+    async def notify_coupon_alert(self, coupon_code: str, title: str, message: str, commit: bool = True):
+        """Notification type: coupon_alert"""
+        try:
+            await self.repo.create_admin_notification_if_not_exists(
+                admin_id=None,
+                type="coupon_alert",
+                title=title,
+                message=message,
+                related_entity_type="coupon",
+                related_entity_id=coupon_code,
+                commit=commit
+            )
+        except Exception as e:
+            logger.error("Failed to create coupon_alert notification: %s", e)
+
 

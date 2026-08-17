@@ -92,6 +92,18 @@ class SuperadminAdminsService:
             related_user_id=new_admin.id,
         )
 
+        try:
+            from app.integrations.resend import resend_email
+            await resend_email.send_superadmin_new_admin(
+                super_admin_email=current_superadmin.email,
+                super_admin_name=current_superadmin.full_name,
+                admin_name=new_admin.full_name,
+                admin_email=new_admin.email,
+                created_at=new_admin.created_at.strftime("%d %b %Y, %I:%M %p") if new_admin.created_at else "",
+            )
+        except Exception as email_err:
+            pass
+
         return self._to_response(new_admin)
 
     async def list_admins(
@@ -214,6 +226,29 @@ class SuperadminAdminsService:
             description=f"Super Admin {current_superadmin.full_name} updated administrator profile for '{user.full_name}' ({user.email}).",
         )
 
+        # Superadmin notification
+        await create_admin_management_notification(
+            db=self.db,
+            title="Admin Profile Updated",
+            message=f"Administrator '{user.full_name}' ({user.email}) profile details were updated.",
+            severity="INFO",
+            related_entity_id=user.id,
+            related_user_id=user.id,
+        )
+
+        try:
+            from datetime import datetime
+            from app.integrations.resend import resend_email
+            await resend_email.send_superadmin_admin_updated(
+                super_admin_email=current_superadmin.email,
+                super_admin_name=current_superadmin.full_name,
+                admin_name=user.full_name,
+                admin_email=user.email,
+                updated_at=datetime.now().strftime("%d %b %Y, %I:%M %p"),
+            )
+        except Exception:
+            pass
+
         return self._to_response(user)
 
     async def update_admin_status(
@@ -263,6 +298,29 @@ class SuperadminAdminsService:
             related_user_id=user.id,
         )
 
+        try:
+            from datetime import datetime
+            from app.integrations.resend import resend_email
+            dt_str = datetime.now().strftime("%d %b %Y, %I:%M %p")
+            if new_is_active:
+                await resend_email.send_superadmin_admin_activated(
+                    super_admin_email=current_superadmin.email,
+                    super_admin_name=current_superadmin.full_name,
+                    admin_name=user.full_name,
+                    admin_email=user.email,
+                    activated_at=dt_str,
+                )
+            else:
+                await resend_email.send_superadmin_admin_deactivated(
+                    super_admin_email=current_superadmin.email,
+                    super_admin_name=current_superadmin.full_name,
+                    admin_name=user.full_name,
+                    admin_email=user.email,
+                    deactivated_at=dt_str,
+                )
+        except Exception:
+            pass
+
         return self._to_response(user)
 
     async def update_admin_password(
@@ -288,6 +346,30 @@ class SuperadminAdminsService:
             module="admin_management",
             description=f"Super Admin {current_superadmin.full_name} reset password for administrator account '{user.full_name}' ({user.email}).",
         )
+
+        # Superadmin security notification
+        from app.services.superadmin_notification_service import create_security_notification
+        await create_security_notification(
+            db=self.db,
+            title="Admin Password Changed / Reset",
+            message=f"Password for Administrator '{user.full_name}' ({user.email}) was reset by Super Admin.",
+            severity="WARNING",
+            related_entity_id=user.id,
+            related_user_id=user.id,
+        )
+
+        try:
+            from datetime import datetime
+            from app.integrations.resend import resend_email
+            await resend_email.send_superadmin_admin_password_updated(
+                super_admin_email=current_superadmin.email,
+                super_admin_name=current_superadmin.full_name,
+                admin_name=user.full_name,
+                admin_email=user.email,
+                updated_at=datetime.now().strftime("%d %b %Y, %I:%M %p"),
+            )
+        except Exception:
+            pass
 
         return self._to_response(user)
 

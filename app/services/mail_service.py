@@ -190,3 +190,29 @@ class MailService:
                 print(f"==========================================\n")
             else:
                 raise e
+
+    @staticmethod
+    async def send_generic_email(
+        email: str,
+        subject: str,
+        html_content: str,
+    ) -> bool:
+        """Send a transactional/notification email using existing SMTP configuration."""
+        message = MessageSchema(
+            subject=subject,
+            recipients=[email],
+            body=html_content,
+            subtype=MessageType.html,
+        )
+        fm = FastMail(conf)
+        try:
+            await fm.send_message(message)
+            logger.info(f"SMTP notification email sent successfully to {email} | Subject: {subject}")
+            return True
+        except Exception as e:
+            logger.error(f"SMTP notification email delivery failed for {email}: {e}")
+            if settings.DEBUG:
+                print(f"\n==========================================")
+                print(f"[DEV MODE - SMTP FAILED] Email to {email} | Subject: {subject}")
+                print(f"==========================================\n")
+            return False

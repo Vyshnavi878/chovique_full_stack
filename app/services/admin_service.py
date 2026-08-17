@@ -1600,6 +1600,11 @@ class AdminService:
                     "line_total": line_total,
                 })
 
+            subtotal = round(subtotal, 2)
+            discount = round(getattr(payload, 'discount', 0.0) or 0.0, 2)
+            tax = round(getattr(payload, 'tax', 0.0) or 0.0, 2)
+            total_amount = max(0.0, round(subtotal - discount + tax, 2))
+
             # Generate sequential Receipt Number (REC-YYYY-000001)
             receipt_number = await self.offline_sale_repo.generate_next_receipt_number()
             receipt_id = receipt_number
@@ -1650,6 +1655,13 @@ class AdminService:
 
             await self.db.commit()
             await self.db.refresh(sale)
+
+            try:
+                from app.services.notification_service import NotificationService
+                await NotificationService(self.db).notify_new_offline_sale(receipt_number=receipt_number, total_amount=total_amount)
+            except Exception as notif_err:
+                logger.warning("Failed to create offline sale notification: %s", notif_err)
+
             return self._format_sale_response(sale)
         else:
             # Legacy single-item fallback

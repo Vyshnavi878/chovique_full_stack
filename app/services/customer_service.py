@@ -733,6 +733,17 @@ class CustomerService:
         )
 
         try:
+            from app.services.notification_service import NotificationService
+            await NotificationService(self.db).notify_support_message(
+                ticket_id=ticket.id,
+                user_name=user_obj.full_name,
+                subject=f"{payload.category}: {payload.description[:40]}",
+                commit=False
+            )
+        except Exception as notif_err:
+            logger.warning("Failed to create admin notification for support ticket: %s", notif_err)
+
+        try:
             from app.integrations.resend import resend_email
             await resend_email.send_ticket_created(
                 email=user_obj.email,
