@@ -50,6 +50,8 @@ class RecentActivityItem(BaseModel):
 class SuperadminOverviewResponse(BaseModel):
     total_revenue: KPICardData
     total_orders: KPICardData
+    online_orders: Optional[KPICardData] = None
+    offline_orders: Optional[KPICardData] = None
     total_customers: KPICardData
     active_admins: KPICardData
     revenue_trend: List[RevenueTrendPoint]

@@ -140,7 +140,7 @@ class SuperadminOverviewService:
         rev_pct_change = calculate_pct_change(curr_total_revenue, prev_total_revenue)
 
         # -----------------------------------------------------
-        # 2. Total Orders (Current vs Previous)
+        # 2. Total Orders & Online / Offline breakdown (Current vs Previous)
         # -----------------------------------------------------
         curr_orders_res = await self.db.execute(
             select(func.count(Order.id)).where(
@@ -150,6 +150,7 @@ class SuperadminOverviewService:
             )
         )
         curr_orders = int(curr_orders_res.scalar() or 0)
+        curr_online_orders = curr_orders
 
         prev_orders_res = await self.db.execute(
             select(func.count(Order.id)).where(
@@ -159,8 +160,27 @@ class SuperadminOverviewService:
             )
         )
         prev_orders = int(prev_orders_res.scalar() or 0)
+        prev_online_orders = prev_orders
+
+        curr_offline_orders_res = await self.db.execute(
+            select(func.count(OfflineSale.id)).where(
+                OfflineSale.created_at >= curr_start,
+                OfflineSale.created_at <= curr_end,
+            )
+        )
+        curr_offline_orders = int(curr_offline_orders_res.scalar() or 0)
+
+        prev_offline_orders_res = await self.db.execute(
+            select(func.count(OfflineSale.id)).where(
+                OfflineSale.created_at >= prev_start,
+                OfflineSale.created_at <= prev_end,
+            )
+        )
+        prev_offline_orders = int(prev_offline_orders_res.scalar() or 0)
 
         orders_pct_change = calculate_pct_change(float(curr_orders), float(prev_orders))
+        online_orders_pct_change = calculate_pct_change(float(curr_online_orders), float(prev_online_orders))
+        offline_orders_pct_change = calculate_pct_change(float(curr_offline_orders), float(prev_offline_orders))
 
         # -----------------------------------------------------
         # 3. Total Customers (Registered customers count)
@@ -356,6 +376,18 @@ class SuperadminOverviewService:
                 current_value=float(curr_orders),
                 previous_value=float(prev_orders),
                 percentage_change=orders_pct_change,
+                comparison_label=label,
+            ),
+            online_orders=KPICardData(
+                current_value=float(curr_online_orders),
+                previous_value=float(prev_online_orders),
+                percentage_change=online_orders_pct_change,
+                comparison_label=label,
+            ),
+            offline_orders=KPICardData(
+                current_value=float(curr_offline_orders),
+                previous_value=float(prev_offline_orders),
+                percentage_change=offline_orders_pct_change,
                 comparison_label=label,
             ),
             total_customers=KPICardData(
