@@ -684,6 +684,11 @@ class AdminService:
 
         current_status = order.status or "Processing"
         new_status = payload.status
+
+        # Short-circuit to avoid duplicate logs/notifications if already in the target status
+        if current_status.lower() == new_status.lower():
+            return self._fmt_order(order)
+
         self._validate_fulfillment_transition(current_status, new_status)
 
         try:
@@ -799,6 +804,10 @@ class AdminService:
 
         current_ps = (order.payment_status or "Pending").strip()
         new_ps = payload.payment_status
+
+        # Short-circuit to avoid duplicate logs/notifications if already in the target status
+        if current_ps.lower() == new_ps.lower():
+            return self._fmt_order(order)
 
         self._validate_payment_transition(current_ps, new_ps)
 

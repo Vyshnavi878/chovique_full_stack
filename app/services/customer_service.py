@@ -21,7 +21,7 @@ from app.repositories.user_repository import UserRepository
 
 from app.schemas.contact import ContactMessageRequest, ContactMessageResponse
 from app.schemas.coupon import CouponValidationRequest, CouponValidationResponse, UserCouponResponse
-from app.schemas.order import OrderPayload, OrderResponse, CartItemResponse, ShippingAddressSchema
+from app.schemas.order import OrderPayload, OrderResponse, CartItemResponse, ShippingAddressSchema, OrderItemResponse
 from app.schemas.product import ProductResponse, ReviewResponse
 from app.schemas.ticket import CreateTicketPayload, SupportTicketResponse, TicketFeedbackPayload
 from app.schemas.user import (
@@ -634,7 +634,7 @@ class CustomerService:
                     category="Chocolates",
                     price=float(item.price or 0.0),
                 )
-            cart_items.append(CartItemResponse(product=product_res, quantity=item.quantity or 1))
+            cart_items.append(OrderItemResponse(product=product_res, quantity=item.quantity or 1, price=float(item.price or 0.0)))
 
         ship_addr_raw = getattr(order, "shipping_address", None)
         if isinstance(ship_addr_raw, dict):

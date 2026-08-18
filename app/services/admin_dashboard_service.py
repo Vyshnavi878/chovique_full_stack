@@ -77,7 +77,7 @@ class AdminDashboardService:
         # 1. Total orders in date range using SQL count
         orders_res = await self.db.execute(
             select(func.count(Order.id)).where(
-                Order.status.in_(VALID_PAID_STATUSES),
+                func.upper(Order.payment_status) == "PAID",
                 Order.created_at >= start_dt,
                 Order.created_at <= end_dt,
             )
@@ -226,7 +226,7 @@ class AdminDashboardService:
             nxt = curr + timedelta(days=1)
             res = await self.db.execute(
                 select(func.coalesce(func.sum(Order.total), 0.0), func.count(Order.id)).where(
-                    Order.status.in_(VALID_PAID_STATUSES),
+                    func.upper(Order.payment_status) == "PAID",
                     Order.created_at >= curr,
                     Order.created_at < nxt,
                 )
@@ -261,7 +261,7 @@ class AdminDashboardService:
             .join(OrderItem, Product.id == OrderItem.product_id)
             .join(Order, OrderItem.order_id == Order.id)
             .where(
-                Order.status.in_(VALID_PAID_STATUSES),
+                func.upper(Order.payment_status) == "PAID",
                 Order.created_at >= start_dt,
                 Order.created_at <= end_dt,
             )

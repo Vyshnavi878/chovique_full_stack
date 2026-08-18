@@ -17,6 +17,7 @@ from app.schemas.superadmin_overview import (
     SalesSourceData,
     SuperadminOverviewResponse,
     TopSellingProductOverview,
+    PaymentMetrics,
 )
 
 logger = logging.getLogger(__name__)
@@ -103,7 +104,7 @@ class SuperadminOverviewService:
         # -----------------------------------------------------
         curr_online_res = await self.db.execute(
             select(func.coalesce(func.sum(Order.total), 0.0)).where(
-                Order.status.in_(VALID_PAID_STATUSES),
+                func.upper(Order.payment_status) == "PAID",
                 Order.created_at >= curr_start,
                 Order.created_at <= curr_end,
             )
@@ -121,7 +122,7 @@ class SuperadminOverviewService:
 
         prev_online_res = await self.db.execute(
             select(func.coalesce(func.sum(Order.total), 0.0)).where(
-                Order.status.in_(VALID_PAID_STATUSES),
+                func.upper(Order.payment_status) == "PAID",
                 Order.created_at >= prev_start,
                 Order.created_at <= prev_end,
             )
@@ -365,6 +366,40 @@ class SuperadminOverviewService:
                 )
             )
 
+        # Payment Metrics
+        pm_completed_res = await self.db.execute(
+            select(func.count(Order.id)).where(
+                func.upper(Order.payment_status) == "PAID",
+                Order.created_at >= curr_start,
+                Order.created_at <= curr_end,
+            )
+        )
+        pm_completed = pm_completed_res.scalar() or 0
+
+        pm_pending_res = await self.db.execute(
+            select(func.count(Order.id)).where(
+                func.upper(Order.payment_status).in_(["PENDING", "PROCESSING"]),
+                Order.created_at >= curr_start,
+                Order.created_at <= curr_end,
+            )
+        )
+        pm_pending = pm_pending_res.scalar() or 0
+
+        pm_cancelled_res = await self.db.execute(
+            select(func.count(Order.id)).where(
+                func.upper(Order.payment_status).in_(["FAILED", "CANCELLED", "REFUNDED", "REFUND PENDING", "PARTIALLY REFUNDED"]),
+                Order.created_at >= curr_start,
+                Order.created_at <= curr_end,
+            )
+        )
+        pm_cancelled = pm_cancelled_res.scalar() or 0
+
+        payment_metrics = PaymentMetrics(
+            completed=pm_completed,
+            pending=pm_pending,
+            cancelled=pm_cancelled,
+        )
+
         return SuperadminOverviewResponse(
             total_revenue=KPICardData(
                 current_value=curr_total_revenue,
@@ -402,6 +437,7 @@ class SuperadminOverviewService:
                 percentage_change=admin_pct_change,
                 comparison_label=label,
             ),
+            payment_metrics=payment_metrics,
             revenue_trend=revenue_trend,
             sales_source=sales_source,
             top_selling_products=top_selling_products,

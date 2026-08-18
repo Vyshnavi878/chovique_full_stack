@@ -32,9 +32,17 @@ class CartItemResponse(BaseModel):
     quantity: int
 
 
+class OrderItemResponse(BaseModel):
+    product: ProductResponse
+    quantity: int
+    price: float
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
 class OrderResponse(BaseModel):
     id: str
-    items: list[CartItemResponse]
+    items: list[OrderItemResponse]
     total: float
     subtotal: float
     discount: float

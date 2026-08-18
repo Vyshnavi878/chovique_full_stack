@@ -272,7 +272,7 @@ class AuthService:
 
         if not user.is_active:
             raise ValueError(
-                "Account is disabled."
+                "Your account is deactivated by the administration due to some issues. Leave a request to support.chovique.com to activate your account."
             )
 
 
@@ -319,7 +319,6 @@ class AuthService:
                     await redis_client.delete(attempts_key)
 
                     try:
-                        from datetime import datetime
                         from app.integrations.resend import resend_email
                         await resend_email.send_superadmin_security_alert(
                             super_admin_email="superadmin@chovique.com",

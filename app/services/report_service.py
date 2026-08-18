@@ -3,7 +3,7 @@ import io
 import math
 from datetime import datetime, date, timedelta
 from typing import Dict, Any, List, Tuple
-from sqlalchemy import select, func, text, and_, or_, inspect
+from sqlalchemy import select, func, text, and_, or_, inspect, case
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -77,8 +77,7 @@ class ReportService:
             ).where(
                 Order.created_at >= start_dt,
                 Order.created_at <= end_dt,
-                Order.status != "CANCELLED",
-                Order.status != "Cancelled"
+                func.upper(Order.payment_status) == "PAID"
             )
         )
         online_row = online_res.first()
@@ -110,7 +109,7 @@ class ReportService:
 
         prev_online_res = await self.db.execute(
             select(func.coalesce(func.sum(Order.total), 0.0)).where(
-                Order.created_at >= prev_start, Order.created_at <= prev_end, Order.status != "CANCELLED", Order.status != "Cancelled"
+                Order.created_at >= prev_start, Order.created_at <= prev_end, func.upper(Order.payment_status) == "PAID"
             )
         )
         prev_offline_res = await self.db.execute(
@@ -132,7 +131,7 @@ class ReportService:
 
             on_d = await self.db.execute(
                 select(func.coalesce(func.sum(Order.total), 0.0), func.count(Order.id)).where(
-                    Order.created_at >= d_start, Order.created_at <= d_end, Order.status != "CANCELLED", Order.status != "Cancelled"
+                    Order.created_at >= d_start, Order.created_at <= d_end, func.upper(Order.payment_status) == "PAID"
                 )
             )
             on_rev, on_cnt = on_d.first()
@@ -216,8 +215,12 @@ class ReportService:
         summary_res = await self.db.execute(
             select(
                 func.count(Order.id).label("total_orders"),
-                func.coalesce(func.sum(Order.total), 0.0).label("total_revenue"),
-                func.coalesce(func.avg(Order.total), 0.0).label("avg_value")
+                func.coalesce(func.sum(
+                    case((func.upper(Order.payment_status) == "PAID", Order.total), else_=0.0)
+                ), 0.0).label("total_revenue"),
+                func.coalesce(func.avg(
+                    case((func.upper(Order.payment_status) == "PAID", Order.total), else_=None)
+                ), 0.0).label("avg_value")
             ).where(Order.created_at >= start_dt, Order.created_at <= end_dt)
         )
         total_orders, total_rev, avg_val = summary_res.first()
@@ -279,7 +282,9 @@ class ReportService:
             d_start = datetime.combine(curr, datetime.min.time())
             d_end = datetime.combine(curr, datetime.max.time())
             cnt_res = await self.db.execute(
-                select(func.count(Order.id), func.coalesce(func.sum(Order.total), 0.0)).where(
+                select(func.count(Order.id), func.coalesce(func.sum(
+                    case((func.upper(Order.payment_status) == "PAID", Order.total), else_=0.0)
+                ), 0.0)).where(
                     Order.created_at >= d_start, Order.created_at <= d_end
                 )
             )
@@ -419,7 +424,7 @@ class ReportService:
                 func.coalesce(func.sum(Order.total), 0.0).label("total_spent")
             )
             .select_from(User)
-            .outerjoin(Order, and_(User.id == Order.user_id, Order.status != "CANCELLED", Order.status != "Cancelled"))
+            .outerjoin(Order, and_(User.id == Order.user_id, func.upper(Order.payment_status) == "PAID"))
             .where(User.created_at >= start_dt, User.created_at <= end_dt)
             .group_by(User.id, User.full_name, User.email, User.phone, User.created_at)
             .order_by(User.created_at.desc())

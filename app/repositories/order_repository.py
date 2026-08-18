@@ -2,7 +2,7 @@ import re
 from datetime import date, datetime
 from typing import Optional, Literal
 
-from sqlalchemy import select, func, or_, and_, cast, Date
+from sqlalchemy import select, func, or_, and_, cast, Date, Text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.models.order import Order, OrderItem, OrderSequence

@@ -47,6 +47,14 @@ class RecentActivityItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class PaymentMetrics(BaseModel):
+    completed: int
+    pending: int
+    cancelled: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class SuperadminOverviewResponse(BaseModel):
     total_revenue: KPICardData
     total_orders: KPICardData
@@ -54,6 +62,7 @@ class SuperadminOverviewResponse(BaseModel):
     offline_orders: Optional[KPICardData] = None
     total_customers: KPICardData
     active_admins: KPICardData
+    payment_metrics: Optional[PaymentMetrics] = None
     revenue_trend: List[RevenueTrendPoint]
     sales_source: SalesSourceData
     top_selling_products: List[TopSellingProductOverview]

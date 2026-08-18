@@ -138,9 +138,9 @@ class CustomerDetailsResponse(BaseModel):
 
 
 class CustomerUpdatePayload(BaseModel):
-    full_name: str
-    email: str
-    phone: str
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
     address_street: Optional[str] = None
     address_city: Optional[str] = None
     address_state: Optional[str] = None
@@ -149,9 +149,11 @@ class CustomerUpdatePayload(BaseModel):
 
     @field_validator("full_name", mode="before")
     @classmethod
-    def validate_full_name(cls, v: str) -> str:
-        if not v or not str(v).strip():
-            raise ValueError("full_name is required and cannot be empty or whitespace-only.")
+    def validate_full_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if not str(v).strip():
+            raise ValueError("full_name cannot be empty or whitespace-only.")
         v_trimmed = str(v).strip()
         if len(v_trimmed) < 2:
             raise ValueError("full_name must be at least 2 characters long.")
@@ -159,9 +161,11 @@ class CustomerUpdatePayload(BaseModel):
 
     @field_validator("email", mode="before")
     @classmethod
-    def validate_and_normalize_email(cls, v: str) -> str:
-        if not v or not str(v).strip():
-            raise ValueError("email is required.")
+    def validate_and_normalize_email(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if not str(v).strip():
+            raise ValueError("email cannot be empty.")
         v_norm = str(v).strip().lower()
         if not EMAIL_REGEX.match(v_norm):
             raise ValueError("Please provide a valid email address.")
@@ -169,9 +173,11 @@ class CustomerUpdatePayload(BaseModel):
 
     @field_validator("phone", mode="before")
     @classmethod
-    def validate_and_normalize_phone(cls, v: str) -> str:
-        if not v or not str(v).strip():
-            raise ValueError("phone is required.")
+    def validate_and_normalize_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if not str(v).strip():
+            raise ValueError("phone cannot be empty.")
         v_trimmed = str(v).strip()
         if not PHONE_REGEX.match(v_trimmed):
             raise ValueError("Please provide a valid phone number (e.g. +91 9876543210 or 9876543210).")

@@ -100,10 +100,6 @@ class ProductService:
             import uuid
             slug = f"{slug}-{str(uuid.uuid4())[:8]}"
 
-        nutrition_dict = None
-        if data.nutrition:
-            nutrition_dict = data.nutrition.model_dump()
-
         sku = data.sku
         if not sku:
             count = await self.product_repo.count()
@@ -121,7 +117,6 @@ class ProductService:
             stock=data.stock,
             description=data.description,
             ingredients=data.ingredients,
-            nutrition=nutrition_dict,
             badge=data.badge,
             image=data.image,
             hover_image=data.hover_image,
@@ -154,10 +149,6 @@ class ProductService:
             return None
 
         update_data = data.model_dump(exclude_unset=True)
-
-        # Handle nutrition serialization
-        if "nutrition" in update_data and update_data["nutrition"]:
-            update_data["nutrition"] = update_data["nutrition"].model_dump() if hasattr(update_data["nutrition"], "model_dump") else update_data["nutrition"]
 
         if not update_data:
             return ProductResponse.from_orm_model(existing)

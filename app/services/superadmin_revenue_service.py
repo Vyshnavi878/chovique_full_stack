@@ -114,7 +114,7 @@ class SuperadminRevenueService:
             ).where(
                 Order.created_at >= curr_start,
                 Order.created_at <= curr_end,
-                Order.status.in_(valid_order_statuses),
+                func.upper(Order.payment_status) == "PAID",
             )
         )
         online_curr_rev, online_curr_orders = online_curr_res.one()
@@ -145,7 +145,7 @@ class SuperadminRevenueService:
             ).where(
                 Order.created_at >= prev_start,
                 Order.created_at <= prev_end,
-                Order.status.in_(valid_order_statuses),
+                func.upper(Order.payment_status) == "PAID",
             )
         )
         online_prev_rev, online_prev_orders = online_prev_res.one()
@@ -223,7 +223,7 @@ class SuperadminRevenueService:
             select(Order.payment_method, func.sum(Order.total)).where(
                 Order.created_at >= curr_start,
                 Order.created_at <= curr_end,
-                Order.status.in_(valid_order_statuses),
+                func.upper(Order.payment_status) == "PAID",
             ).group_by(Order.payment_method)
         )
         for pm, p_sum in online_pm_res.all():
@@ -261,7 +261,7 @@ class SuperadminRevenueService:
             select(Order.total, Order.created_at).where(
                 Order.created_at >= curr_start,
                 Order.created_at <= curr_end,
-                Order.status.in_(valid_order_statuses),
+                func.upper(Order.payment_status) == "PAID",
             )
         )
         online_orders_data = online_orders_raw.all()
