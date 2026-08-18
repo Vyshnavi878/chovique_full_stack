@@ -47,21 +47,41 @@ class SuperadminSalesService:
 
         valid_statuses = ["Paid", "Delivered", "Shipped", "Processing"]
 
-        # Current period online
-        online_curr_res = await self.db.execute(
-            select(
-                func.coalesce(func.sum(OrderItem.quantity), 0),
-                func.coalesce(func.sum(Order.total), 0.0),
-            )
-            .select_from(Order)
-            .join(OrderItem, OrderItem.order_id == Order.id)
+        # -------------------------------------------------------------------
+        # IMPORTANT: Revenue and Units must be computed in SEPARATE queries.
+        #
+        # If we JOIN Order with OrderItem in a single query and SUM Order.total,
+        # the order total gets counted once per item row — causing it to be
+        # doubled (or tripled, etc.) for multi-item orders.
+        #
+        # Correct approach:
+        #   - Revenue  → query Order directly (no OrderItem join)
+        #   - Units    → query OrderItem with the Order join
+        # -------------------------------------------------------------------
+
+        # Current period: online REVENUE (query Order directly — no join)
+        online_curr_rev_res = await self.db.execute(
+            select(func.coalesce(func.sum(Order.total), 0.0))
             .where(
                 Order.created_at >= curr_start,
                 Order.created_at <= curr_end,
-                Order.status.in_(valid_statuses),
+                func.upper(Order.payment_status) == "PAID",
             )
         )
-        online_curr_units, online_curr_rev = online_curr_res.one()
+        online_curr_rev = online_curr_rev_res.scalar_one() or 0.0
+
+        # Current period: online UNITS (requires OrderItem join)
+        online_curr_units_res = await self.db.execute(
+            select(func.coalesce(func.sum(OrderItem.quantity), 0))
+            .select_from(OrderItem)
+            .join(Order, OrderItem.order_id == Order.id)
+            .where(
+                Order.created_at >= curr_start,
+                Order.created_at <= curr_end,
+                func.upper(Order.payment_status) == "PAID",
+            )
+        )
+        online_curr_units = online_curr_units_res.scalar_one() or 0
 
         # Current period offline
         offline_curr_res = await self.db.execute(
@@ -75,21 +95,29 @@ class SuperadminSalesService:
         )
         offline_curr_units, offline_curr_rev = offline_curr_res.one()
 
-        # Previous period online
-        online_prev_res = await self.db.execute(
-            select(
-                func.coalesce(func.sum(OrderItem.quantity), 0),
-                func.coalesce(func.sum(Order.total), 0.0),
-            )
-            .select_from(Order)
-            .join(OrderItem, OrderItem.order_id == Order.id)
+        # Previous period: online REVENUE (query Order directly — no join)
+        online_prev_rev_res = await self.db.execute(
+            select(func.coalesce(func.sum(Order.total), 0.0))
             .where(
                 Order.created_at >= prev_start,
                 Order.created_at <= prev_end,
-                Order.status.in_(valid_statuses),
+                func.upper(Order.payment_status) == "PAID",
             )
         )
-        online_prev_units, online_prev_rev = online_prev_res.one()
+        online_prev_rev = online_prev_rev_res.scalar_one() or 0.0
+
+        # Previous period: online UNITS (requires OrderItem join)
+        online_prev_units_res = await self.db.execute(
+            select(func.coalesce(func.sum(OrderItem.quantity), 0))
+            .select_from(OrderItem)
+            .join(Order, OrderItem.order_id == Order.id)
+            .where(
+                Order.created_at >= prev_start,
+                Order.created_at <= prev_end,
+                func.upper(Order.payment_status) == "PAID",
+            )
+        )
+        online_prev_units = online_prev_units_res.scalar_one() or 0
 
         # Previous period offline
         offline_prev_res = await self.db.execute(
@@ -114,7 +142,7 @@ class SuperadminSalesService:
             select(Product.name, func.sum(OrderItem.quantity).label("units"))
             .join(OrderItem, OrderItem.product_id == Product.id)
             .join(Order, OrderItem.order_id == Order.id)
-            .where(Order.status.in_(valid_statuses))
+            .where(func.upper(Order.payment_status) == "PAID")
             .group_by(Product.name)
             .order_by(func.sum(OrderItem.quantity).desc())
             .limit(1)
@@ -168,7 +196,7 @@ class SuperadminSalesService:
                 func.coalesce(func.sum(OrderItem.quantity * OrderItem.price), 0.0).label("revenue"),
             )
             .join(Order, OrderItem.order_id == Order.id)
-            .where(Order.status.in_(valid_statuses))
+            .where(func.upper(Order.payment_status) == "PAID")
         )
         if date_from:
             online_stmt = online_stmt.where(Order.created_at >= date_from)
@@ -240,6 +268,7 @@ class SuperadminSalesService:
         search: Optional[str] = None,
         status_filter: Optional[str] = None,
         payment_method: Optional[str] = None,
+        payment_status_filter: Optional[str] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
         page: int = 1,
@@ -262,6 +291,17 @@ class SuperadminSalesService:
 
         if payment_method and payment_method.upper() != "ALL":
             stmt = stmt.where(Order.payment_method.ilike(f"%{payment_method}%"))
+
+        if payment_status_filter:
+            psf = payment_status_filter.lower()
+            if psf == "completed":
+                stmt = stmt.where(func.upper(Order.payment_status) == "PAID")
+            elif psf == "pending":
+                stmt = stmt.where(func.upper(Order.payment_status).in_(["PENDING", "PROCESSING"]))
+            elif psf in ["cancelled", "failed"]:
+                stmt = stmt.where(func.upper(Order.payment_status).in_(["FAILED", "CANCELLED", "REFUNDED", "REFUND PENDING", "PARTIALLY REFUNDED"]))
+            else:
+                stmt = stmt.where(func.upper(Order.payment_status) == psf.upper())
 
         if date_from:
             stmt = stmt.where(Order.created_at >= date_from)
