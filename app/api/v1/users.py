@@ -49,4 +49,13 @@ async def get_my_user_coupons(
     db: AsyncSession = Depends(get_db),
 ):
     service = CouponService(db)
-    return await service.get_user_coupons(current_user.id)
+    return await service.get_available_coupons(current_user.id)
+
+
+@router.get("/me/coupons/used", summary="Get used coupons for current user")
+async def get_my_used_coupons(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = CouponService(db)
+    return await service.get_used_coupons(current_user.id)

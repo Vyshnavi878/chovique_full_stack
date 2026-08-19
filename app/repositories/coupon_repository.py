@@ -149,13 +149,28 @@ class CouponRepository:
 
         kwargs["code"] = code_clean
 
-        expires_raw = kwargs.pop("expires_at", None) or kwargs.pop("expiryDate", None) or kwargs.pop("expiry_date", None) or kwargs.pop("expiresAt", None) or kwargs.pop("endDate", None) or kwargs.pop("end_date", None)
-        if expires_raw:
-            kwargs["expires_at"] = self._parse_expires_at(expires_raw)
+        has_expiry_arg = any(k in kwargs for k in ("expires_at", "expiryDate", "expiry_date", "expiresAt", "endDate", "end_date"))
+        expires_raw = (
+            kwargs.pop("expires_at", None)
+            or kwargs.pop("expiryDate", None)
+            or kwargs.pop("expiry_date", None)
+            or kwargs.pop("expiresAt", None)
+            or kwargs.pop("endDate", None)
+            or kwargs.pop("end_date", None)
+        )
+        if has_expiry_arg:
+            kwargs["expires_at"] = self._parse_expires_at(expires_raw) if expires_raw else None
 
-        start_raw = kwargs.pop("start_at", None) or kwargs.pop("startDate", None) or kwargs.pop("start_date", None) or kwargs.pop("startAt", None) or kwargs.pop("begin_date", None)
-        if start_raw:
-            kwargs["start_at"] = self._parse_datetime(start_raw, is_end_of_day=False)
+        has_start_arg = any(k in kwargs for k in ("start_at", "startDate", "start_date", "startAt", "begin_date"))
+        start_raw = (
+            kwargs.pop("start_at", None)
+            or kwargs.pop("startDate", None)
+            or kwargs.pop("start_date", None)
+            or kwargs.pop("startAt", None)
+            or kwargs.pop("begin_date", None)
+        )
+        if has_start_arg:
+            kwargs["start_at"] = self._parse_datetime(start_raw, is_end_of_day=False) if start_raw else None
 
         eligibility_rule = kwargs.pop("eligibility_rule", None)
         eligibility_value = kwargs.pop("eligibility_value", None)
@@ -191,17 +206,33 @@ class CouponRepository:
         return await self.get_by_code(code_clean)
 
     async def update(self, code: str, **kwargs) -> Coupon | None:
+        kwargs.pop("code", None)
         coupon = await self.get_by_code(code)
         if not coupon:
             return None
         
-        expires_raw = kwargs.pop("expires_at", None) or kwargs.pop("expiryDate", None) or kwargs.pop("expiry_date", None) or kwargs.pop("expiresAt", None) or kwargs.pop("endDate", None) or kwargs.pop("end_date", None)
-        if expires_raw:
-            kwargs["expires_at"] = self._parse_expires_at(expires_raw)
+        has_expiry_arg = any(k in kwargs for k in ("expires_at", "expiryDate", "expiry_date", "expiresAt", "endDate", "end_date"))
+        expires_raw = (
+            kwargs.pop("expires_at", None)
+            or kwargs.pop("expiryDate", None)
+            or kwargs.pop("expiry_date", None)
+            or kwargs.pop("expiresAt", None)
+            or kwargs.pop("endDate", None)
+            or kwargs.pop("end_date", None)
+        )
+        if has_expiry_arg:
+            kwargs["expires_at"] = self._parse_expires_at(expires_raw) if expires_raw else None
 
-        start_raw = kwargs.pop("start_at", None) or kwargs.pop("startDate", None) or kwargs.pop("start_date", None) or kwargs.pop("startAt", None) or kwargs.pop("begin_date", None)
-        if start_raw:
-            kwargs["start_at"] = self._parse_datetime(start_raw, is_end_of_day=False)
+        has_start_arg = any(k in kwargs for k in ("start_at", "startDate", "start_date", "startAt", "begin_date"))
+        start_raw = (
+            kwargs.pop("start_at", None)
+            or kwargs.pop("startDate", None)
+            or kwargs.pop("start_date", None)
+            or kwargs.pop("startAt", None)
+            or kwargs.pop("begin_date", None)
+        )
+        if has_start_arg:
+            kwargs["start_at"] = self._parse_datetime(start_raw, is_end_of_day=False) if start_raw else None
 
         kwargs.pop("eligibility_rule", None)
         kwargs.pop("eligibility_value", None)
@@ -209,7 +240,7 @@ class CouponRepository:
         kwargs.pop("applicable_ids", None)
 
         for key, value in kwargs.items():
-            if hasattr(coupon, key) and value is not None:
+            if hasattr(coupon, key):
                 setattr(coupon, key, value)
                 
         self._check_and_deactivate(coupon)

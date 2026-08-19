@@ -37,3 +37,16 @@ async def validate_coupon(
     return await service.validate_and_calculate_discount(user_id, payload.code)
 
 
+@router.get(
+    "/used",
+    summary="Get used coupons for the current user",
+)
+async def get_used_coupons(
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    service = CouponService(db)
+    user_id = current_user.id if current_user else "guest"
+    return await service.get_used_coupons(user_id)
+
+

@@ -369,7 +369,15 @@ class ResendEmailIntegration:
         """
         return await self.send_email(email, subject, html)
 
-    async def send_order_confirmation(self, email: str, name: str, order_id: str, total: float, order_date: str = "", payment_status: str = "Paid"):
+    async def send_order_confirmation(self, email: str, name: str, order_id: str, total: float, order_date: str = "", payment_status: str = "Pending"):
+        p_status = str(payment_status or "Pending").strip()
+        if p_status.upper() in ("PENDING", "PROCESSING"):
+            p_status_display = "Pending"
+        elif p_status.upper() in ("PAID", "COMPLETED", "SUCCESSFUL"):
+            p_status_display = "Paid"
+        else:
+            p_status_display = p_status.title()
+
         subject = f"Order Confirmed – #{order_id}"
         html = f"""
         <p>Hello {name},</p>
@@ -379,7 +387,7 @@ class ResendEmailIntegration:
             <li><strong>Order ID:</strong> #{order_id}</li>
             <li><strong>Order Date:</strong> {order_date or 'Today'}</li>
             <li><strong>Total Amount:</strong> ₹{total:,.2f}</li>
-            <li><strong>Payment Status:</strong> {payment_status}</li>
+            <li><strong>Payment Status:</strong> {p_status_display}</li>
         </ul>
         <p>We will keep you updated about your order.</p>
         <br/>

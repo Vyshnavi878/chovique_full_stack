@@ -41,6 +41,24 @@ class UserCouponResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class UsedCouponResponse(BaseModel):
+    id: str
+    code: str
+    name: Optional[str] = None
+    description: str = ""
+    discount_type: str = "PERCENTAGE"
+    discount_percent: float = 0.0
+    discount_amount: float = 0.0
+    discount_received: float = 0.0
+    discount_str: str = ""
+    order_id: str
+    used_at: str
+    used_at_iso: Optional[str] = None
+    status: str = "Used"
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class CouponCreate(BaseModel):
     code: str
     name: Optional[str] = None
@@ -147,14 +165,22 @@ class CouponAdminResponse(BaseModel):
     per_user_usage_limit: int
     is_active: bool
     status: str = "ACTIVE"
-    created_at: datetime
-    
+    created_at: Optional[datetime] = None
+
     # Metadata for admin
     eligibility_rule: str = "ALL_USERS"
     eligibility_value: Optional[str] = None
     applicability: str = "ENTIRE_STORE"
     applicable_ids: List[str] = []
     usage_count: int = 0
+
+    # Date string aliases for consistent frontend binding
+    startDate: Optional[str] = None
+    expiryDate: Optional[str] = None
+    start_date: Optional[str] = None
+    expiry_date: Optional[str] = None
+    expiresAt: Optional[str] = None
+    startAt: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

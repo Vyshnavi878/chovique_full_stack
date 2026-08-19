@@ -455,14 +455,22 @@ class CustomerService:
 
             if payload.coupon_code and coupon_discount > 0:
                 from app.models.coupon import CouponUsage
+                from sqlalchemy import select, func
                 coupon = await self.coupon_repo.get_by_code(payload.coupon_code)
                 if coupon:
-                    self.db.add(CouponUsage(
-                        coupon_id=coupon.id,
-                        user_id=user_id,
-                        order_id=order.id,
-                        discount_amount=coupon_discount or 0.0
-                    ))
+                    existing_usage_q = select(func.count(CouponUsage.id)).where(
+                        CouponUsage.coupon_id == coupon.id,
+                        CouponUsage.order_id == order.id
+                    )
+                    already_recorded = (await self.db.execute(existing_usage_q)).scalar() or 0
+                    if already_recorded == 0:
+                        self.db.add(CouponUsage(
+                            coupon_id=coupon.id,
+                            user_id=user_id,
+                            order_id=order.id,
+                            discount_amount=coupon_discount or 0.0
+                        ))
+                        coupon.usage_count = (coupon.usage_count or 0) + 1
 
             # Clean up ordered items from database Cart & Wishlist tables
             from app.repositories.cart_repository import CartRepository
@@ -511,6 +519,7 @@ class CustomerService:
                         name=user.full_name,
                         order_id=order.id,
                         total=order.total,
+                        payment_status=order.payment_status,
                     )
                 )
         except Exception as e:

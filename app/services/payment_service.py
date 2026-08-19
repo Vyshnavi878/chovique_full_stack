@@ -103,6 +103,7 @@ class PaymentService:
                     name=user.full_name,
                     order_id=order.id,
                     total=order.total,
+                    payment_status=order.payment_status,
                 )
 
         return {

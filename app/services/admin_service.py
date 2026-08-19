@@ -433,6 +433,9 @@ class AdminService:
             if exp_dt <= now_utc:
                 status_str = "EXPIRED"
 
+        exp_str = c.expires_at.strftime("%Y-%m-%d") if c.expires_at else None
+        start_str = c.start_at.strftime("%Y-%m-%d") if c.start_at else None
+
         return CouponAdminResponse(
             id=c.id,
             code=c.code,
@@ -446,6 +449,12 @@ class AdminService:
             minimum_order_amount=c.minimum_order_amount or 0.0,
             start_at=c.start_at,
             expires_at=c.expires_at,
+            startDate=start_str,
+            expiryDate=exp_str,
+            start_date=start_str,
+            expiry_date=exp_str,
+            expiresAt=exp_str,
+            startAt=start_str,
             usage_limit=c.usage_limit or 0,
             per_user_usage_limit=c.per_user_usage_limit or 1,
             is_active=c.is_active if c.is_active is not None else True,
@@ -483,7 +492,9 @@ class AdminService:
     async def update_coupon(self, code: str, data):
         from app.repositories.coupon_repository import CouponRepository
         coupon_repo = CouponRepository(self.db)
-        c = await coupon_repo.update(code, **data.model_dump(exclude_unset=True))
+        update_data = data.model_dump(exclude_unset=True)
+        update_data.pop("code", None)
+        c = await coupon_repo.update(code, **update_data)
         if not c:
             return None
         return self._format_coupon_admin_response(c)
@@ -1319,6 +1330,8 @@ class AdminService:
                 category=t.category,
                 description=t.description,
                 status=t.status,
+                orderId=t.order_id,
+                order_id=t.order_id,
                 adminNotes=t.admin_notes,
                 customerResolutionFeedback=t.customer_resolution_feedback,
                 date=t.created_at.strftime("%Y-%m-%d") if t.created_at else datetime.now().strftime("%Y-%m-%d"),
@@ -1339,26 +1352,28 @@ class AdminService:
         if not ticket:
             return None
 
-        if ticket.status == "Resolved":
-            raise ValueError("Ticket is already resolved.")
+        status_changed = (ticket.status != payload.status)
+        notes_changed = (payload.admin_notes is not None and ticket.admin_notes != payload.admin_notes)
 
-        if ticket.status != payload.status:
-            ticket.status = payload.status
-            ticket.status_change_count += 1
-            if payload.admin_notes:
+        if status_changed or notes_changed:
+            if status_changed:
+                ticket.status = payload.status
+                ticket.status_change_count += 1
+            if payload.admin_notes is not None:
                 ticket.admin_notes = payload.admin_notes
             await self.db.commit()
             await self.db.refresh(ticket)
 
-            # In-App Notification for intermediate status
-            from app.repositories.notification_repository import NotificationRepository
-            notif_repo = NotificationRepository(self.db)
-            await notif_repo.create(
-                user_id=ticket.customer_id,
-                text=f"Your support ticket #{ticket.id} status is now: {ticket.status}.",
-                type="support",
-                reference_id=ticket.id,
-            )
+            if status_changed:
+                # In-App Notification for intermediate status
+                from app.repositories.notification_repository import NotificationRepository
+                notif_repo = NotificationRepository(self.db)
+                await notif_repo.create(
+                    user_id=ticket.customer_id,
+                    text=f"Your support ticket #{ticket.id} status is now: {ticket.status}.",
+                    type="support",
+                    reference_id=ticket.id,
+                )
 
         return SupportTicketResponse(
             id=ticket.id,
@@ -1367,6 +1382,8 @@ class AdminService:
             category=ticket.category,
             description=ticket.description,
             status=ticket.status,
+            orderId=ticket.order_id,
+            order_id=ticket.order_id,
             adminNotes=ticket.admin_notes,
             customerResolutionFeedback=ticket.customer_resolution_feedback,
             date=ticket.created_at.strftime("%Y-%m-%d") if ticket.created_at else datetime.now().strftime("%Y-%m-%d"),
@@ -1417,9 +1434,8 @@ class AdminService:
                         email=customer.email,
                         name=customer.full_name,
                         ticket_id=ticket.id,
-                        category=ticket.category,
                     )
-                else:
+                elif hasattr(resend_email, "send_custom_email"):
                     await resend_email.send_custom_email(
                         to_email=customer.email,
                         subject=f"Support Ticket #{ticket.id} Resolved",
@@ -1435,6 +1451,8 @@ class AdminService:
             category=ticket.category,
             description=ticket.description,
             status=ticket.status,
+            orderId=ticket.order_id,
+            order_id=ticket.order_id,
             adminNotes=ticket.admin_notes,
             customerResolutionFeedback=ticket.customer_resolution_feedback,
             date=ticket.created_at.strftime("%Y-%m-%d") if ticket.created_at else datetime.now().strftime("%Y-%m-%d"),

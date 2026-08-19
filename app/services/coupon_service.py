@@ -46,20 +46,22 @@ class CouponService:
             if coupon_type not in ["CUSTOMER", "CUSTOMER_COUPON", "CUSTOMER COUPON"]:
                 continue
 
-            # 2. Check user-specific usage limit (Per-user usage tracking)
+            # 2. Check user-specific usage limit (Per-user usage tracking, excluding cancelled orders)
             user_usage = 0
             if c.per_user_usage_limit > 0 and user_id and user_id != "guest":
-                user_usage_q = select(func.count(CouponUsage.id)).where(
+                user_usage_q = select(func.count(CouponUsage.id)).join(Order, CouponUsage.order_id == Order.id).where(
                     CouponUsage.coupon_id == c.id,
-                    CouponUsage.user_id == user_id
+                    CouponUsage.user_id == user_id,
+                    Order.status.notin_(["Cancelled", "CANCELLED"])
                 )
                 user_usage = (await self.db.execute(user_usage_q)).scalar() or 0
 
-            # 3. Check total usage limit
+            # 3. Check total usage limit (excluding cancelled orders)
             total_usage = 0
             if c.usage_limit > 0:
-                total_usage_q = select(func.count(CouponUsage.id)).where(
-                    CouponUsage.coupon_id == c.id
+                total_usage_q = select(func.count(CouponUsage.id)).join(Order, CouponUsage.order_id == Order.id).where(
+                    CouponUsage.coupon_id == c.id,
+                    Order.status.notin_(["Cancelled", "CANCELLED"])
                 )
                 total_usage = (await self.db.execute(total_usage_q)).scalar() or 0
 
@@ -73,6 +75,20 @@ class CouponService:
             is_total_available = (total_usage < c.usage_limit) if c.usage_limit > 0 else True
             is_user_available = (user_usage < c.per_user_usage_limit) if (c.per_user_usage_limit > 0 and user_id and user_id != "guest") else True
 
+            # 5. Check eligibility rules (FIRST_ORDER, SPECIFIC_USERS)
+            is_eligible_rule = True
+            if hasattr(c, "rules") and c.rules:
+                for rule in c.rules:
+                    if rule.rule_type == "FIRST_ORDER" and user_id and user_id != "guest":
+                        user_orders_q = select(func.count(Order.id)).where(Order.user_id == user_id, Order.status.notin_(["Cancelled", "CANCELLED"]))
+                        order_cnt = (await self.db.execute(user_orders_q)).scalar() or 0
+                        if order_cnt > 0:
+                            is_eligible_rule = False
+                    elif rule.rule_type == "SPECIFIC_USERS" and rule.rule_value:
+                        allowed_users = [u.strip() for u in rule.rule_value.split(",") if u.strip()]
+                        if not user_id or str(user_id) not in allowed_users:
+                            is_eligible_rule = False
+
             # Determine dynamic status: Available / Used / Expired / Not Available
             if not is_user_available:
                 status_str = "Used"
@@ -80,17 +96,12 @@ class CouponService:
             elif not is_started:
                 status_str = "Not Available"
                 is_active = False
-            elif not is_not_expired or not is_active_flag or not is_total_available:
+            elif not is_not_expired or not is_active_flag or not is_total_available or not is_eligible_rule:
                 status_str = "Expired"
                 is_active = False
             else:
                 status_str = "Available"
                 is_active = True
-
-            # Check eligibility rules for inclusion (e.g. FIRST_ORDER, SPECIFIC_USERS)
-            if hasattr(c, "eligibility_rule") and c.eligibility_rule == "SPECIFIC_USERS":
-                if c.eligibility_value and user_id and str(user_id) not in c.eligibility_value.split(","):
-                    continue
 
             # If only_available is requested (for Cart / Checkout), exclude used/expired/inactive/not available
             if only_available:
@@ -132,6 +143,107 @@ class CouponService:
                 seen_codes.add(code_key)
                 deduped.append(r)
         return deduped
+
+    async def get_used_coupons(self, user_id: str) -> list[dict]:
+        """
+        Get all coupon usages for the authenticated customer to display under Used Coupons in Customer Dashboard.
+        Strictly returns usages belonging to user_id.
+        """
+        if not user_id or user_id == "guest":
+            return []
+
+        # 1. Fetch from CouponUsage relation
+        q = (
+            select(CouponUsage, Coupon, Order)
+            .join(Coupon, CouponUsage.coupon_id == Coupon.id)
+            .outerjoin(Order, CouponUsage.order_id == Order.id)
+            .where(CouponUsage.user_id == user_id)
+            .order_by(CouponUsage.used_at.desc())
+        )
+        res = await self.db.execute(q)
+        rows = res.all()
+
+        seen_order_coupon = set()
+        result = []
+        for usage, coupon, order in rows:
+            seen_order_coupon.add((usage.order_id, coupon.code.upper()))
+            used_date_str = usage.used_at.strftime("%d-%m-%Y") if usage.used_at else ""
+            discount_str = ""
+            if coupon.discount_type == "PERCENTAGE":
+                discount_str = f"{coupon.discount_percent}% OFF"
+            elif coupon.discount_type == "FIXED_AMOUNT":
+                discount_str = f"₹{coupon.discount_amount} OFF"
+            elif coupon.discount_type == "FREE_SHIPPING":
+                discount_str = "FREE SHIPPING"
+            else:
+                discount_str = f"₹{usage.discount_amount:.2f} OFF"
+
+            order_ident = order.id if order else usage.order_id
+
+            result.append({
+                "id": usage.id,
+                "code": coupon.code,
+                "name": coupon.name or coupon.code,
+                "description": coupon.description or "",
+                "discount_type": coupon.discount_type,
+                "discount_percent": coupon.discount_percent,
+                "discount_amount": coupon.discount_amount,
+                "discount_received": usage.discount_amount,
+                "discount_str": discount_str,
+                "order_id": order_ident,
+                "used_at": used_date_str,
+                "used_at_iso": usage.used_at.isoformat() if usage.used_at else None,
+                "status": "Used",
+            })
+
+        # 2. Also check Order table for any orders placed with coupon_code for this user
+        orders_q = (
+            select(Order)
+            .where(
+                Order.user_id == user_id,
+                Order.coupon_code.isnot(None),
+                Order.status.notin_(["Cancelled", "CANCELLED"])
+            )
+            .order_by(Order.created_at.desc())
+        )
+        orders_res = (await self.db.execute(orders_q)).scalars().all()
+
+        for ord_item in orders_res:
+            c_code = (ord_item.coupon_code or "").strip().upper()
+            if not c_code or (ord_item.id, c_code) in seen_order_coupon:
+                continue
+            seen_order_coupon.add((ord_item.id, c_code))
+
+            c_obj = await self.coupon_repo.get_by_code(c_code)
+            used_date_str = ord_item.created_at.strftime("%d-%m-%Y") if ord_item.created_at else ""
+            disc_amt = float(ord_item.coupon_discount or 0.0)
+
+            discount_str = f"₹{disc_amt:.2f} OFF"
+            if c_obj:
+                if c_obj.discount_type == "PERCENTAGE":
+                    discount_str = f"{c_obj.discount_percent}% OFF"
+                elif c_obj.discount_type == "FIXED_AMOUNT":
+                    discount_str = f"₹{c_obj.discount_amount} OFF"
+                elif c_obj.discount_type == "FREE_SHIPPING":
+                    discount_str = "FREE SHIPPING"
+
+            result.append({
+                "id": f"ord-{ord_item.id}",
+                "code": c_code,
+                "name": c_obj.name if c_obj else c_code,
+                "description": c_obj.description if c_obj else "Coupon applied on order.",
+                "discount_type": c_obj.discount_type if c_obj else "PERCENTAGE",
+                "discount_percent": c_obj.discount_percent if c_obj else 0.0,
+                "discount_amount": c_obj.discount_amount if c_obj else disc_amt,
+                "discount_received": disc_amt,
+                "discount_str": discount_str,
+                "order_id": ord_item.id,
+                "used_at": used_date_str,
+                "used_at_iso": ord_item.created_at.isoformat() if ord_item.created_at else None,
+                "status": "Used",
+            })
+
+        return result
 
     async def validate_and_calculate_discount(
         self,
@@ -203,16 +315,39 @@ class CouponService:
         
         if items is not None:
             item_count = len(items)
+            from app.models.product import Product
             for itm in items:
-                pid = itm.get("product_id")
+                pid = itm.get("product_id") or itm.get("id")
                 qty = itm.get("quantity", 1)
                 price = itm.get("price", 0.0)
                 item_price = price * qty
                 total_subtotal += item_price
 
                 is_eligible = True
-                if allowed_product_ids and str(pid) not in allowed_product_ids:
-                    is_eligible = False
+                prod_obj = None
+                if pid:
+                    prod_obj = await self.db.get(Product, str(pid))
+
+                if allowed_product_ids:
+                    prod_matched = (
+                        str(pid) in allowed_product_ids
+                        or (prod_obj and str(prod_obj.id) in allowed_product_ids)
+                        or (prod_obj and prod_obj.sku and str(prod_obj.sku).strip() in allowed_product_ids)
+                        or (prod_obj and prod_obj.slug and str(prod_obj.slug).strip() in allowed_product_ids)
+                        or (prod_obj and prod_obj.name and str(prod_obj.name).strip().lower() in [p.lower() for p in allowed_product_ids])
+                    )
+                    if not prod_matched:
+                        is_eligible = False
+
+                if allowed_category_ids:
+                    cat_matched = False
+                    if prod_obj:
+                        if prod_obj.category_id and str(prod_obj.category_id) in allowed_category_ids:
+                            cat_matched = True
+                        elif prod_obj.category and str(prod_obj.category).lower() in [c.lower() for c in allowed_category_ids]:
+                            cat_matched = True
+                    if not cat_matched:
+                        is_eligible = False
 
                 if is_eligible:
                     eligible_subtotal += item_price
