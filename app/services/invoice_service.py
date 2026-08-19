@@ -1,4 +1,5 @@
 import datetime
+import html
 import logging
 from typing import Optional
 from app.models.order import Order
@@ -8,9 +9,13 @@ logger = logging.getLogger(__name__)
 class InvoiceService:
     @staticmethod
     def generate_html_invoice(order: Order, user_name: str, user_email: str) -> str:
+        safe_user_name = html.escape(str(user_name or "Customer"))
+        safe_user_email = html.escape(str(user_email or ""))
+
         items_html = ""
         for item in getattr(order, "items", []) or []:
-            product_name = item.product.name if item.product else "Chovique Product"
+            raw_product_name = item.product.name if item.product else "Chovique Product"
+            product_name = html.escape(str(raw_product_name))
             price = item.price or 0.0
             quantity = item.quantity or 1
             line_total = price * quantity
@@ -24,18 +29,26 @@ class InvoiceService:
             """
             
         shipping_address = order.shipping_address or {}
+        addr_name = html.escape(str(shipping_address.get('name') or safe_user_name))
+        addr_street = html.escape(str(shipping_address.get('street') or ''))
+        addr_city = html.escape(str(shipping_address.get('city') or ''))
+        addr_state = html.escape(str(shipping_address.get('state') or ''))
+        addr_zip = html.escape(str(shipping_address.get('zip') or shipping_address.get('zip_code') or ''))
+        addr_phone = html.escape(str(shipping_address.get('phone') or 'N/A'))
+
         address_html = f"""
-        <strong>{shipping_address.get('name', user_name)}</strong><br>
-        {shipping_address.get('street', '')}<br>
-        {shipping_address.get('city', '')}, {shipping_address.get('state', '')} {shipping_address.get('zip', shipping_address.get('zip_code', ''))}<br>
-        Phone: {shipping_address.get('phone', 'N/A')}
+        <strong>{addr_name}</strong><br>
+        {addr_street}<br>
+        {addr_city}, {addr_state} {addr_zip}<br>
+        Phone: {addr_phone}
         """
 
+        coupon_code_safe = html.escape(str(order.coupon_code or 'CODE'))
         coupon_discount_row = ""
         if getattr(order, "coupon_discount", 0) and order.coupon_discount > 0:
             coupon_discount_row = f"""
             <tr>
-                <td colspan="3" style="text-align: right; padding: 8px 10px; color: #555;">Coupon Discount ({order.coupon_code or 'CODE'})</td>
+                <td colspan="3" style="text-align: right; padding: 8px 10px; color: #555;">Coupon Discount ({coupon_code_safe})</td>
                 <td style="text-align: right; padding: 8px 10px; color: #e74c3c;">-₹{order.coupon_discount:.2f}</td>
             </tr>
             """

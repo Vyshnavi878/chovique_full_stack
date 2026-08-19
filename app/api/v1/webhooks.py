@@ -20,40 +20,42 @@ async def razorpay_webhook(
 ):
     body_bytes = await request.body()
 
-    if x_razorpay_signature:
-        is_valid = razorpay_client.verify_webhook_signature(body_bytes, x_razorpay_signature)
-        if not is_valid:
-            logger.warning("Invalid Razorpay webhook signature received.")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid webhook signature.")
+    if not x_razorpay_signature:
+        logger.warning("Missing Razorpay webhook signature header.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing X-Razorpay-Signature header.",
+        )
+
+    is_valid = razorpay_client.verify_webhook_signature(body_bytes, x_razorpay_signature)
+    if not is_valid:
+        logger.warning("Invalid Razorpay webhook signature received.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid Razorpay webhook signature.",
+        )
 
     try:
         payload = await request.json()
         event = payload.get("event")
-        logger.info("Received Razorpay webhook event: %s", event)
+        logger.info("Received verified Razorpay webhook event: %s", event)
 
         payment_entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
         razorpay_order_id = payment_entity.get("order_id")
         razorpay_payment_id = payment_entity.get("id")
 
-        payment_repo = PaymentRepository(db)
-        order_repo = OrderRepository(db)
-
         if event == "payment.captured":
-            if razorpay_order_id:
-                payment = await payment_repo.get_by_razorpay_order_id(razorpay_order_id)
-                if payment and payment.status != "captured":
-                    await payment_repo.update_status(
-                        razorpay_order_id=razorpay_order_id,
-                        status="captured",
-                        razorpay_payment_id=razorpay_payment_id,
-                    )
-                    order = await order_repo.get_by_id(payment.order_id)
-                    if order:
-                        order.status = "Processing"
-                        await db.commit()
+            if razorpay_order_id and razorpay_payment_id:
+                from app.services.payment_service import PaymentService
+                payment_service = PaymentService(db)
+                await payment_service.finalize_online_payment(
+                    razorpay_order_id=razorpay_order_id,
+                    razorpay_payment_id=razorpay_payment_id,
+                )
 
         elif event == "payment.failed":
             if razorpay_order_id:
+                payment_repo = PaymentRepository(db)
                 await payment_repo.update_status(
                     razorpay_order_id=razorpay_order_id,
                     status="failed",

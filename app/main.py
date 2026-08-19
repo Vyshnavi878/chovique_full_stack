@@ -60,6 +60,12 @@ async def lifespan(app: FastAPI):
                 try:
                     await autocommit_conn.execute(text("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS coupon_type VARCHAR(50) DEFAULT 'CUSTOMER';"))
                     await autocommit_conn.execute(text("ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS order_id VARCHAR(36);"))
+                    await autocommit_conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP WITH TIME ZONE;"))
+                    await autocommit_conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP WITH TIME ZONE;"))
+                    await autocommit_conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;"))
+                    await autocommit_conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS returned_at TIMESTAMP WITH TIME ZONE;"))
+                    await autocommit_conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS return_reason TEXT;"))
+                    await autocommit_conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;"))
                 except Exception as ex:
                     logger.warning("Auto migration note: %s", ex)
                 logger.info("Database auto-migrations executed successfully.")
@@ -93,10 +99,15 @@ app = FastAPI(
     debug=settings.DEBUG,
     lifespan=lifespan,
     docs_url=None,
+    openapi_url="/openapi.json" if settings.DEBUG else None,
 )
 
 @app.get("/docs", include_in_schema=False)
 async def custom_swagger_ui_html():
+    if not settings.DEBUG:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Not Found")
+
     html = f"""<!DOCTYPE html>
 <html>
 <head>

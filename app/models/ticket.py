@@ -21,7 +21,7 @@ class SupportTicket(Base):
     category = Column(String(100), nullable=False)
     description = Column(Text, nullable=False)
     order_id = Column(String(36), ForeignKey("orders.id", ondelete="SET NULL"), nullable=True, index=True)
-    status = Column(String(50), default="Pending", nullable=False)
+    status = Column(String(50), default="Pending", nullable=False, index=True)
     status_change_count = Column(Integer, default=0, nullable=False)
     admin_notes = Column(Text, nullable=True)
     customer_resolution_feedback = Column(String(50), nullable=True)

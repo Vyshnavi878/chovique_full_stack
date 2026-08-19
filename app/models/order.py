@@ -35,6 +35,12 @@ class Order(Base):
     invoice_url = Column(String(500), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    delivered_at = Column(DateTime(timezone=True), nullable=True)
+    cancelled_at = Column(DateTime(timezone=True), nullable=True)
+    cancellation_reason = Column(Text, nullable=True)
+    returned_at = Column(DateTime(timezone=True), nullable=True)
+    return_reason = Column(Text, nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=True)
 
     user = relationship("User", lazy="selectin")
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan", lazy="selectin")

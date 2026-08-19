@@ -45,22 +45,8 @@ class RazorpayIntegration:
             logger.info("Created Razorpay order %s for amount %s", order.get("id"), amount)
             return order
         except ImportError:
-            logger.warning("razorpay package not installed. Generating mock Razorpay order.")
-            import uuid
-            mock_id = f"order_{uuid.uuid4().hex[:14]}"
-            return {
-                "id": mock_id,
-                "entity": "order",
-                "amount": amount_in_paise,
-                "amount_paid": 0,
-                "amount_due": amount_in_paise,
-                "currency": currency,
-                "receipt": receipt,
-                "status": "created",
-                "attempts": 0,
-                "notes": notes or {},
-                "created_at": 1700000000,
-            }
+            logger.error("razorpay Python package is not installed.")
+            raise RuntimeError("Razorpay SDK is not installed in runtime environment.")
         except Exception as e:
             logger.error("Error creating Razorpay order: %s", e)
             raise ValueError(f"Razorpay order creation failed: {e}")
@@ -78,6 +64,10 @@ class RazorpayIntegration:
         if not razorpay_order_id or not razorpay_payment_id or not razorpay_signature:
             return False
 
+        if not self.key_secret:
+            logger.error("RAZORPAY_KEY_SECRET is not configured.")
+            return False
+
         try:
             import razorpay
             client = razorpay.Client(auth=(self.key_id, self.key_secret))
@@ -88,7 +78,6 @@ class RazorpayIntegration:
             })
             return True
         except ImportError:
-            # Manual fallback HMAC SHA256 check
             msg = f"{razorpay_order_id}|{razorpay_payment_id}".encode("utf-8")
             generated_sig = hmac.new(
                 self.key_secret.encode("utf-8"),
@@ -146,17 +135,8 @@ class RazorpayIntegration:
             logger.info("Razorpay refund %s processed for payment %s", refund.get("id"), razorpay_payment_id)
             return refund
         except ImportError:
-            import uuid
-            mock_refund_id = f"rfnd_{uuid.uuid4().hex[:14]}"
-            return {
-                "id": mock_refund_id,
-                "entity": "refund",
-                "amount": int(round((amount or 0) * 100)),
-                "currency": "INR",
-                "payment_id": razorpay_payment_id,
-                "notes": notes or {},
-                "status": "processed",
-            }
+            logger.error("razorpay Python package is not installed.")
+            raise RuntimeError("Razorpay SDK is not installed in runtime environment.")
         except Exception as e:
             logger.error("Razorpay refund failed: %s", e)
             raise ValueError(f"Razorpay refund failed: {e}")

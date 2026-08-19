@@ -410,10 +410,11 @@ class CustomerService:
             shipping_addr_dict = payload.shipping_address.model_dump()
 
             # Determine payment_status based on payment method
-            # COD: payment not yet collected at order creation → PENDING
-            # Online (Card/UPI/NetBanking): simulated successful → PAID
+            # Direct order creation (e.g. COD): payment not yet collected -> PENDING
             is_cod = payload.payment_method in ("Cash on Delivery", "COD", "Cash On Delivery")
-            initial_payment_status = "PENDING" if is_cod else "PAID"
+            if not is_cod:
+                logger.info("Direct order creation called for non-COD payment method %s. Setting payment_status=PENDING until verified.", payload.payment_method)
+            initial_payment_status = "PENDING"
 
             order = await self.order_repo.create_order(
                 user_id=user_id,
@@ -470,7 +471,6 @@ class CustomerService:
                             order_id=order.id,
                             discount_amount=coupon_discount or 0.0
                         ))
-                        coupon.usage_count = (coupon.usage_count or 0) + 1
 
             # Clean up ordered items from database Cart & Wishlist tables
             from app.repositories.cart_repository import CartRepository
@@ -564,62 +564,118 @@ class CustomerService:
             return None
         return self._format_order_response(order)
 
-    async def cancel_order(self, order_id: str, user_id: str) -> OrderResponse | None:
-        async with self.db.begin_nested():
-            order = await self.order_repo.get_by_id(order_id)
-            if not order or order.user_id != user_id:
-                return None
+    async def cancel_order(self, order_id: str, user_id: str, reason: str | None = None) -> OrderResponse | None:
+        order = await self.order_repo.get_by_id(order_id)
+        if not order or order.user_id != user_id:
+            return None
 
-            from app.repositories.platform_settings_repository import PlatformSettingsRepository
-            ps_repo = PlatformSettingsRepository(self.db)
-            ps = await ps_repo.get()
+        from app.repositories.platform_settings_repository import PlatformSettingsRepository
+        ps_repo = PlatformSettingsRepository(self.db)
+        ps = await ps_repo.get()
 
-            if not ps.order_cancellation_enabled:
-                raise ValueError("Order cancellation is currently disabled by system configuration.")
+        if not ps.order_cancellation_enabled:
+            raise ValueError("Order cancellation is currently disabled by system configuration.")
 
-            if order.status not in ("Pending", "Confirmed", "Processing"):
-                raise ValueError("Order cannot be cancelled in its current state.")
+        if order.status in ("Shipped", "Out for Delivery", "Out_For_Delivery", "Delivered", "Cancelled", "Returned", "Refunded"):
+            raise ValueError("Order cannot be cancelled because it is already shipped, delivered, or cancelled.")
 
-            if ps.cancellation_time_limit > 0 and order.created_at:
-                from datetime import datetime, timezone
-                now = datetime.now(timezone.utc)
-                created_at = order.created_at
-                if created_at.tzinfo is None:
-                    created_at = created_at.replace(tzinfo=timezone.utc)
-                diff_hours = (now - created_at).total_seconds() / 3600.0
-                if diff_hours > ps.cancellation_time_limit:
-                    raise ValueError(f"Order cancellation time limit ({ps.cancellation_time_limit} hours) has passed.")
+        if order.status not in ("Pending", "Confirmed", "Processing"):
+            raise ValueError("Order cannot be cancelled in its current state.")
 
-            order.status = "Cancelled"
-            current_ps = (order.payment_status or "Pending").strip()
-            if current_ps.upper() == "PAID":
-                order.payment_status = "Refund Pending"
-            elif current_ps.upper() in ("PENDING", "PROCESSING"):
-                order.payment_status = "Cancelled"
+        if order.created_at:
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            created_at = order.created_at
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            diff_hours = (now - created_at).total_seconds() / 3600.0
+            limit = ps.cancellation_time_limit if (ps and ps.cancellation_time_limit) else 24
+            if diff_hours >= limit:
+                raise ValueError(f"Order cancellation time limit ({limit} hours from placement) has passed.")
 
-            # Refund coins used and reverse coins earned
-            from app.services.wallet_service import WalletService
-            wallet_service = WalletService(self.db)
-            await wallet_service.refund_order_coins(
-                user_id=user_id,
-                order_id=order.id,
-                coins_used=order.coins_used or 0,
-                coins_earned=order.coins_earned or 0,
-                commit=False,
-            )
+        order.status = "Cancelled"
+        if hasattr(order, "cancelled_at"):
+            from datetime import datetime, timezone
+            order.cancelled_at = datetime.now(timezone.utc)
+        if hasattr(order, "cancellation_reason") and reason:
+            order.cancellation_reason = reason
 
-            for item in order.items:
-                if item.product:
-                    await self.product_repo.update(
-                        item.product_id,
-                        stock=item.product.stock + item.quantity,
-                        commit=False
-                    )
-            
-            self.db.add(order)
-            
+        current_ps = (order.payment_status or "Pending").strip()
+        if current_ps.upper() == "PAID":
+            order.payment_status = "Refund Pending"
+        elif current_ps.upper() in ("PENDING", "PROCESSING"):
+            order.payment_status = "Cancelled"
+
+        # Refund coins used and reverse coins earned
+        from app.services.wallet_service import WalletService
+        wallet_service = WalletService(self.db)
+        await wallet_service.refund_order_coins(
+            user_id=user_id,
+            order_id=order.id,
+            coins_used=order.coins_used or 0,
+            coins_earned=order.coins_earned or 0,
+            commit=False,
+        )
+
+        for item in order.items:
+            if item.product:
+                await self.product_repo.update(
+                    item.product_id,
+                    stock=item.product.stock + item.quantity,
+                    commit=False
+                )
+        
+        self.db.add(order)
         await self.db.commit()
         return self._format_order_response(order)
+
+    async def return_order(self, order_id: str, user_id: str, reason: str | None = None) -> OrderResponse | None:
+        order = await self.order_repo.get_by_id(order_id)
+        if not order or order.user_id != user_id:
+            return None
+
+        if order.status != "Delivered":
+            raise ValueError("Only delivered orders can be requested for return.")
+
+        if (order.payment_status or "").upper() in ("REFUNDED", "PARTIALLY REFUNDED") or order.status in ("Returned", "Return Requested"):
+            raise ValueError("This order has already been returned or refunded.")
+
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+
+        delivery_dt = getattr(order, "delivered_at", None)
+        if not delivery_dt:
+            raise ValueError("A valid delivery timestamp is required to request a return.")
+        if delivery_dt.tzinfo is None:
+            delivery_dt = delivery_dt.replace(tzinfo=timezone.utc)
+        diff_days = (now - delivery_dt).total_seconds() / 86400.0
+        if diff_days >= 4.0:
+            raise ValueError("The 4-day return window after delivery has expired.")
+
+        order.status = "Return Requested"
+        if hasattr(order, "returned_at"):
+            order.returned_at = now
+        if hasattr(order, "return_reason") and reason:
+            order.return_reason = reason
+
+        self.db.add(order)
+        await self.db.commit()
+
+        try:
+            from app.repositories.notification_repository import NotificationRepository
+            notif_repo = NotificationRepository(self.db)
+            await notif_repo.create(
+                user_id=order.user_id,
+                title="Return Requested",
+                message=f"Return request submitted for Order #{order.id}.",
+                type="order",
+                link=f"/dashboard?tab=orders&order_id={order.id}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to create return notification: {e}")
+
+        db_order = await self.order_repo.get_by_id(order.id)
+        return self._format_order_response(db_order or order)
 
     def _format_order_response(self, order) -> OrderResponse:
         cart_items = []
@@ -669,6 +725,31 @@ class CustomerService:
 
         created_date = order.created_at.strftime("%Y-%m-%d") if getattr(order, "created_at", None) else datetime.now().strftime("%Y-%m-%d")
 
+        from datetime import datetime, timezone
+        now_utc = datetime.now(timezone.utc)
+
+        # 1. Cancel Order eligibility: within 24 hours from creation AND status in (Pending, Confirmed, Processing)
+        is_cancellable = False
+        if str(order.status or "") in ("Pending", "Confirmed", "Processing"):
+            created_dt = getattr(order, "created_at", None)
+            if created_dt:
+                if created_dt.tzinfo is None:
+                    created_dt = created_dt.replace(tzinfo=timezone.utc)
+                diff_hours = (now_utc - created_dt).total_seconds() / 3600.0
+                if diff_hours < 24.0:
+                    is_cancellable = True
+
+        # 2. Return Order eligibility: status is Delivered, valid delivery timestamp exists, within 4 days from delivery, not returned/refunded
+        is_returnable = False
+        if str(order.status or "") == "Delivered" and str(getattr(order, "payment_status", "") or "").upper() not in ("REFUNDED", "PARTIALLY REFUNDED") and str(order.status or "") not in ("Returned", "Return Requested"):
+            delivery_dt = getattr(order, "delivered_at", None)
+            if delivery_dt:
+                if delivery_dt.tzinfo is None:
+                    delivery_dt = delivery_dt.replace(tzinfo=timezone.utc)
+                diff_days = (now_utc - delivery_dt).total_seconds() / 86400.0
+                if diff_days < 4.0:
+                    is_returnable = True
+
         return OrderResponse(
             id=str(order.id),
             items=cart_items,
@@ -690,6 +771,10 @@ class CustomerService:
             paymentMethod=str(order.payment_method or "UPI"),
             invoice_url=getattr(order, "invoice_url", None),
             user_id=getattr(order, "user_id", None),
+            is_cancellable=is_cancellable,
+            is_returnable=is_returnable,
+            created_at=getattr(order, "created_at", None),
+            delivered_at=getattr(order, "delivered_at", None),
         )
 
     # ==========================================================
@@ -841,7 +926,7 @@ class CustomerService:
             status=ticket.status,
             orderId=ord_id,
             order_id=ord_id,
-            adminNotes=ticket.admin_notes,
+            adminNotes=None,
             customerResolutionFeedback=ticket.customer_resolution_feedback,
             date=created_date,
             notified=ticket.notified,

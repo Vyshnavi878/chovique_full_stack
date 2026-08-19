@@ -428,6 +428,8 @@ class AdminService:
         status_str = "ACTIVE"
         if not c.is_active:
             status_str = "INACTIVE"
+        elif c.usage_limit > 0 and usage_count >= c.usage_limit:
+            status_str = "EXPIRED"
         elif c.expires_at:
             exp_dt = c.expires_at if c.expires_at.tzinfo else c.expires_at.replace(tzinfo=timezone.utc)
             if exp_dt <= now_utc:
@@ -705,6 +707,12 @@ class AdminService:
         try:
             # -- Apply status change --
             order.status = new_status
+            if new_status == "Delivered" and getattr(order, "delivered_at", None) is None:
+                from datetime import datetime, timezone
+                order.delivered_at = datetime.now(timezone.utc)
+            elif new_status == "Cancelled" and getattr(order, "cancelled_at", None) is None:
+                from datetime import datetime, timezone
+                order.cancelled_at = datetime.now(timezone.utc)
             await self.db.flush()
 
             # -- Restore stock if cancelled --

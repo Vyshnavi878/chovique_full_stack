@@ -35,13 +35,16 @@ class NotificationRepository:
         return notification
 
     async def mark_read(self, notification_id: str, user_id: str) -> Notification | None:
-        await self.db.execute(
-            update(Notification)
-            .where(Notification.id == notification_id, Notification.user_id == user_id)
-            .values(read=True, is_read=True)
+        result = await self.db.execute(
+            select(Notification).where(Notification.id == notification_id, Notification.user_id == user_id)
         )
-        await self.db.commit()
-        return await self.get_by_id(notification_id)
+        notif = result.scalar_one_or_none()
+        if notif:
+            notif.read = True
+            notif.is_read = True
+            await self.db.commit()
+            await self.db.refresh(notif)
+        return notif
 
     async def get_user_unread_count(self, user_id: str) -> int:
         query = select(func.count(Notification.id)).where(

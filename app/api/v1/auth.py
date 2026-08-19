@@ -137,7 +137,7 @@ def get_csrf_token(response: Response):
 # REGISTER
 # ======================================================
 
-@router.post("/register", response_model=OTPSentResponse)
+@router.post("/register", response_model=OTPSentResponse, dependencies=[Depends(RateLimiter(times=5, seconds=60))])
 async def register( request: RegisterRequest, db: AsyncSession = Depends(get_db),):
 
     try:
@@ -155,7 +155,7 @@ async def register( request: RegisterRequest, db: AsyncSession = Depends(get_db)
 # RESEND OTP (Registration)
 # ======================================================
 
-@router.post( "/resend-otp", response_model=OTPSentResponse)
+@router.post( "/resend-otp", response_model=OTPSentResponse, dependencies=[Depends(RateLimiter(times=3, seconds=60))])
 async def resend_otp(
     request: ResendOTPRequest,
     db: AsyncSession = Depends(get_db),
@@ -176,7 +176,7 @@ async def resend_otp(
 # VERIFY OTP (Registration)
 # ======================================================
 
-@router.post( "/verify-otp", response_model=AuthUserResponse)
+@router.post( "/verify-otp", response_model=AuthUserResponse, dependencies=[Depends(RateLimiter(times=10, seconds=60))])
 async def verify_otp(
     request: VerifyOTPRequest,
     response: Response,
@@ -320,7 +320,7 @@ async def set_password(
 # FORGOT PASSWORD
 # ======================================================
 
-@router.post("/forgot-password", response_model=MessageResponse)
+@router.post("/forgot-password", response_model=MessageResponse, dependencies=[Depends(RateLimiter(times=3, seconds=60))])
 async def forgot_password(
     request: ForgotPasswordRequest,
     db: AsyncSession = Depends(get_db),
@@ -342,7 +342,7 @@ async def forgot_password(
 # RESEND FORGOT PASSWORD OTP
 # ======================================================
 
-@router.post("/resend-forgot-otp", response_model=MessageResponse)
+@router.post("/resend-forgot-otp", response_model=MessageResponse, dependencies=[Depends(RateLimiter(times=3, seconds=60))])
 async def resend_forgot_password_otp(
     request: ResendForgotOTPRequest,
     db: AsyncSession = Depends(get_db),
@@ -363,7 +363,7 @@ async def resend_forgot_password_otp(
 # RESET PASSWORD
 # ======================================================
 
-@router.post("/reset-password", response_model=MessageResponse)
+@router.post("/reset-password", response_model=MessageResponse, dependencies=[Depends(RateLimiter(times=5, seconds=60))])
 async def reset_password(
     request: ResetPasswordRequest,
     db: AsyncSession = Depends(get_db),
@@ -499,7 +499,7 @@ async def logout(
 # UPDATE PASSWORD WITH OTP (AUTHENTICATED)
 # ======================================================
 
-@router.post("/update-password/send-otp", response_model=MessageResponse)
+@router.post("/update-password/send-otp", response_model=MessageResponse, dependencies=[Depends(RateLimiter(times=3, seconds=60))])
 async def send_update_password_otp(
     request: UpdatePasswordSendOTPRequest,
     user_id: str = Depends(get_current_user_id),
@@ -517,7 +517,7 @@ async def send_update_password_otp(
             detail=str(e)
         )
 
-@router.post("/update-password/verify-otp", response_model=MessageResponse)
+@router.post("/update-password/verify-otp", response_model=MessageResponse, dependencies=[Depends(RateLimiter(times=5, seconds=60))])
 async def verify_update_password_otp(
     request: UpdatePasswordVerifyOTPRequest,
     user_id: str = Depends(get_current_user_id),
@@ -538,7 +538,7 @@ async def verify_update_password_otp(
             detail=str(e)
         )
 
-@router.post("/update-password", response_model=MessageResponse)
+@router.post("/update-password", response_model=MessageResponse, dependencies=[Depends(RateLimiter(times=5, seconds=60))])
 async def update_password(
     request: UpdatePasswordRequest,
     user_id: str = Depends(get_current_user_id),

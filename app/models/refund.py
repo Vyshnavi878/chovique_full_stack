@@ -14,7 +14,7 @@ class Refund(Base):
     razorpay_refund_id = Column(String(100), unique=True, nullable=True, index=True)
     amount = Column(Float, nullable=False)
     reason = Column(Text, nullable=True)
-    status = Column(String(50), default="processed", nullable=False)  # pending, processed, failed
+    status = Column(String(50), default="processed", nullable=False, index=True)  # pending, processed, failed
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

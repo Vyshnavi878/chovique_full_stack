@@ -31,80 +31,183 @@ class PaymentService:
     ) -> Dict[str, Any]:
         """
         Verify Razorpay payment signature & update database safely.
-        Enforces double-processing protection.
-        Deducts inventory ONLY upon successful payment confirmation!
+        Enforces double-processing protection and ownership validation.
         """
-        logger.info(
-            "Verifying payment for order_id=%s, payment_id=%s",
-            payload.razorpay_order_id,
-            payload.razorpay_payment_id,
+        return await self.finalize_online_payment(
+            razorpay_order_id=payload.razorpay_order_id,
+            razorpay_payment_id=payload.razorpay_payment_id,
+            razorpay_signature=payload.razorpay_signature,
+            user_id=user_id,
         )
 
-        payment = await self.payment_repo.get_by_razorpay_order_id(payload.razorpay_order_id)
+    async def finalize_online_payment(
+        self,
+        razorpay_order_id: str,
+        razorpay_payment_id: str,
+        razorpay_signature: str | None = None,
+        user_id: str | None = None,
+    ) -> Dict[str, Any]:
+        """
+        Canonical idempotent order-finalization mechanism shared by:
+        1. Client-side /payments/verify
+        2. Razorpay webhook payment.captured
+        """
+        logger.info(
+            "Finalizing online payment for razorpay_order_id=%s, payment_id=%s",
+            razorpay_order_id,
+            razorpay_payment_id,
+        )
+
+        payment = await self.payment_repo.get_by_razorpay_order_id(razorpay_order_id)
         if not payment:
             raise ValueError("Payment transaction record not found.")
 
-        # Double-processing protection
+        # Payment ownership / IDOR validation
+        if user_id and payment.user_id != user_id:
+            logger.warning("Payment ownership mismatch: payment user=%s, auth user=%s", payment.user_id, user_id)
+            raise ValueError("Unauthorized payment transaction access.")
+
+        # Idempotency / Double-processing protection
         if payment.status == "captured":
-            logger.info("Payment %s already processed/captured. Returning success.", payload.razorpay_order_id)
+            logger.info("Payment %s already captured. Idempotent return success.", razorpay_order_id)
             return {
                 "success": True,
                 "message": "Payment already verified.",
                 "order_id": payment.order_id,
             }
 
-        # Step 1: Verify HMAC Signature
-        if payload.razorpay_signature == "mock":
-            is_valid = True
-            logger.info("Mock payment signature detected and accepted.")
-        else:
+        # Verify Razorpay signature if provided (e.g. from client callback)
+        if razorpay_signature:
             is_valid = razorpay_client.verify_payment_signature(
-                razorpay_order_id=payload.razorpay_order_id,
-                razorpay_payment_id=payload.razorpay_payment_id,
-                razorpay_signature=payload.razorpay_signature,
+                razorpay_order_id=razorpay_order_id,
+                razorpay_payment_id=razorpay_payment_id,
+                razorpay_signature=razorpay_signature,
             )
 
-        if not is_valid:
-            await self.payment_repo.update_status(
-                razorpay_order_id=payload.razorpay_order_id,
-                status="failed",
-                razorpay_payment_id=payload.razorpay_payment_id,
-                error_message="Invalid Razorpay payment signature.",
-            )
-            raise ValueError("Payment signature verification failed.")
+            if not is_valid:
+                await self.payment_repo.update_status(
+                    razorpay_order_id=razorpay_order_id,
+                    status="failed",
+                    razorpay_payment_id=razorpay_payment_id,
+                    error_message="Invalid Razorpay payment signature.",
+                )
+                raise ValueError("Payment signature verification failed.")
 
-        # Step 2: Update Payment record
+        # Update Payment record status
         await self.payment_repo.update_status(
-            razorpay_order_id=payload.razorpay_order_id,
+            razorpay_order_id=razorpay_order_id,
             status="captured",
-            razorpay_payment_id=payload.razorpay_payment_id,
-            razorpay_signature=payload.razorpay_signature,
+            razorpay_payment_id=razorpay_payment_id,
+            razorpay_signature=razorpay_signature or payment.razorpay_signature,
         )
 
-        # Step 3: Fetch order & update status to 'Paid' / 'Processing'
+        # Fetch Order & Finalize
         order = await self.order_repo.get_by_id(payment.order_id)
-        if order:
-            # Deduct inventory for all items in order NOW (upon payment confirmation)
-            for item in order.items:
-                product = item.product
-                if product:
-                    new_stock = max(0, product.stock - item.quantity)
-                    await self.product_repo.update(product.id, stock=new_stock)
+        if order and order.payment_status != "PAID":
+            order.payment_status = "PAID"
+            order.status = "Processing"
 
-            # Step 4: Clear user's shopping cart
-            cart = await self.cart_repo.get_or_create_user_cart(user_id)
-            await self.cart_repo.clear_cart(cart.id)
+            # Atomic Inventory Deduction
+            for item in getattr(order, "items", []) or []:
+                if item.product_id and item.quantity > 0:
+                    deducted = await self.product_repo.deduct_stock_atomic(
+                        item.product_id, item.quantity, commit=False
+                    )
+                    if not deducted:
+                        logger.warning(
+                            "Insufficient stock during payment finalization for product %s", item.product_id
+                        )
 
-            # Step 5: Send order confirmation email
-            user = await self.user_repo.get_by_id(user_id)
-            if user:
-                await resend_email.send_order_confirmation(
-                    email=user.email,
-                    name=user.full_name,
+            # Wallet rewards (Redeem used & Earn new)
+            try:
+                from app.services.wallet_service import WalletService
+                wallet_service = WalletService(self.db)
+
+                if getattr(order, "coins_used", 0) and order.coins_used > 0:
+                    await wallet_service.redeem_coins(
+                        user_id=payment.user_id,
+                        order_id=order.id,
+                        coins=order.coins_used,
+                        commit=False,
+                    )
+
+                coins_earned, _ = await wallet_service.earn_coins(
+                    user_id=payment.user_id,
                     order_id=order.id,
-                    total=order.total,
-                    payment_status=order.payment_status,
+                    payable_amount=order.total,
+                    commit=False,
                 )
+                order.coins_earned = coins_earned
+            except Exception as exc:
+                logger.error("Failed to process wallet rewards during finalization: %s", exc)
+
+            # Coupon Usage Recording
+            if getattr(order, "coupon_code", None) and getattr(order, "coupon_discount", 0) > 0:
+                try:
+                    from app.models.coupon import CouponUsage, Coupon
+                    from sqlalchemy import select, func, update
+                    coupon_res = await self.db.execute(
+                        select(Coupon).where(Coupon.code == order.coupon_code)
+                    )
+                    coupon = coupon_res.scalar_one_or_none()
+                    if coupon:
+                        usage_check = await self.db.execute(
+                            select(func.count(CouponUsage.id)).where(
+                                CouponUsage.coupon_id == coupon.id,
+                                CouponUsage.order_id == order.id,
+                            )
+                        )
+                        if (usage_check.scalar() or 0) == 0:
+                            self.db.add(
+                                CouponUsage(
+                                    coupon_id=coupon.id,
+                                    user_id=payment.user_id,
+                                    order_id=order.id,
+                                    discount_amount=order.coupon_discount or 0.0,
+                                )
+                            )
+                except Exception as exc:
+                    logger.error("Failed to record coupon usage during payment finalization: %s", exc)
+
+            # Clear user cart & wishlist
+            try:
+                user_cart = await self.cart_repo.get_or_create_user_cart(payment.user_id, commit=False)
+                from app.repositories.wishlist_repository import WishlistRepository
+                wishlist_repo = WishlistRepository(self.db)
+                for item in getattr(order, "items", []) or []:
+                    await self.cart_repo.remove_item(user_cart.id, item.product_id, commit=False)
+                    await self.wishlist_repo.remove_item(payment.user_id, item.product_id, commit=False) if hasattr(self, "wishlist_repo") else await wishlist_repo.remove_item(payment.user_id, item.product_id, commit=False)
+            except Exception as exc:
+                logger.error("Failed clearing cart/wishlist during payment finalization: %s", exc)
+
+            await self.db.commit()
+
+            # Send Email Confirmation
+            try:
+                user = await self.user_repo.get_by_id(payment.user_id)
+                if user and user.email:
+                    await resend_email.send_order_confirmation(
+                        email=user.email,
+                        name=user.full_name,
+                        order_id=order.id,
+                        total=order.total,
+                        payment_status=order.payment_status,
+                    )
+            except Exception as e:
+                logger.error("Failed sending email confirmation for order %s: %s", order.id, e)
+
+            # Generate Invoice
+            try:
+                from app.services.invoice_service import InvoiceService
+                user = await self.user_repo.get_by_id(payment.user_id)
+                user_name = user.full_name if user else "Customer"
+                user_email = user.email if user else ""
+                inv_url = await InvoiceService.generate_and_upload_invoice(order, user_name, user_email)
+                if inv_url:
+                    order.invoice_url = inv_url
+                    await self.db.commit()
+            except Exception as e:
+                logger.warning("Failed invoice generation for order %s: %s", order.id, e)
 
         return {
             "success": True,

@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -129,6 +130,9 @@ async def get_order_invoice_pdf(
     )
 
 
+from app.schemas.order import OrderPayload, OrderResponse, OrderReturnPayload
+
+
 @router.post(
     "/{order_id}/cancel",
     response_model=OrderResponse,
@@ -136,12 +140,36 @@ async def get_order_invoice_pdf(
 )
 async def cancel_order(
     order_id: str,
+    payload: Optional[OrderReturnPayload] = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     service = CustomerService(db)
     try:
-        order = await service.cancel_order(order_id, current_user.id)
+        reason = payload.reason if payload else None
+        order = await service.cancel_order(order_id, current_user.id, reason=reason)
+        if not order:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
+        return order
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post(
+    "/{order_id}/return",
+    response_model=OrderResponse,
+    summary="Request order return (within 4 days of delivery)",
+)
+async def return_order(
+    order_id: str,
+    payload: Optional[OrderReturnPayload] = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = CustomerService(db)
+    try:
+        reason = payload.reason if payload else None
+        order = await service.return_order(order_id, current_user.id, reason=reason)
         if not order:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
         return order

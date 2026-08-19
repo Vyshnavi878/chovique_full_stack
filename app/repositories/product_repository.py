@@ -281,7 +281,8 @@ class ProductRepository:
         res_first = await self.db.execute(
             select(Category.id).where(Category.is_active.is_(True)).order_by(Category.sort_order.asc())
         )
-        return res_first.scalars().first()
+        first_cat = res_first.scalars().first()
+        return first_cat if first_cat else val
 
     # ==========================================================
     # Create
@@ -330,6 +331,23 @@ class ProductRepository:
             await self.db.flush()
 
         return await self.get_by_id(product_id)
+
+    async def deduct_stock_atomic(self, product_id: str, quantity: int, commit: bool = True) -> bool:
+        """
+        Atomically deduct stock for a product if stock >= quantity.
+        Returns True if successful, False if stock is insufficient.
+        """
+        stmt = (
+            update(Product)
+            .where(Product.id == product_id, Product.stock >= quantity)
+            .values(stock=Product.stock - quantity)
+        )
+        res = await self.db.execute(stmt)
+        if commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
+        return res.rowcount > 0
 
     # ==========================================================
     # Delete

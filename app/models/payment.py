@@ -16,7 +16,7 @@ class Payment(Base):
     razorpay_signature = Column(String(255), nullable=True)
     amount = Column(Float, nullable=False)
     currency = Column(String(10), default="INR", nullable=False)
-    status = Column(String(50), default="created", nullable=False)  # created, captured, failed
+    status = Column(String(50), default="created", nullable=False, index=True)  # created, captured, failed
     error_message = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

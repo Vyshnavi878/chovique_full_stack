@@ -69,18 +69,18 @@ class CheckoutService:
         # Step 2: Validate coupon server-side
         discount = 0.0
         if payload.coupon_code:
-            coupon = await self.coupon_repo.get_by_code(payload.coupon_code)
-            now_utc = datetime.now(timezone.utc)
-            if (
-                coupon
-                and coupon.is_active
-                and (coupon.expires_at is None or coupon.expires_at > now_utc)
-            ):
-                # Check min order value if applicable
-                if coupon.discount_percent > 0:
-                    discount = (subtotal * coupon.discount_percent) / 100.0
-                elif coupon.discount_amount > 0:
-                    discount = coupon.discount_amount
+            from app.services.coupon_service import CouponService
+            coupon_service = CouponService(self.db)
+            coupon_res = await coupon_service.validate_coupon(
+                code=payload.coupon_code,
+                subtotal=subtotal,
+                user_id=user_id,
+            )
+            if coupon_res.valid:
+                discount = coupon_res.discount_amount or 0.0
+            else:
+                logger.warning("Coupon %s invalid during checkout initiation: %s", payload.coupon_code, coupon_res.message)
+                raise ValueError(coupon_res.message or "Invalid or inapplicable coupon code.")
 
         # Step 3: Calculate shipping & tax
         shipping = 0.0 if subtotal > 1500 else 99.0

@@ -19,6 +19,65 @@ class CouponService:
         self.cart_repo = CartRepository(db)
         self.order_repo = OrderRepository(db)
 
+    async def _get_coupon_user_usage(self, coupon: Coupon, user_id: str | None) -> int:
+        if not user_id or user_id == "guest":
+            return 0
+
+        code_upper = (coupon.code or "").strip().upper()
+
+        # 1. Count from CouponUsage relation (joining Coupon and outerjoining Order to exclude cancelled)
+        cu_q = (
+            select(func.count(CouponUsage.id))
+            .join(Coupon, CouponUsage.coupon_id == Coupon.id)
+            .outerjoin(Order, CouponUsage.order_id == Order.id)
+            .where(
+                or_(CouponUsage.coupon_id == coupon.id, func.upper(func.trim(Coupon.code)) == code_upper),
+                CouponUsage.user_id == user_id,
+                or_(Order.id.is_(None), Order.status.notin_(["Cancelled", "CANCELLED"]))
+            )
+        )
+        cu_cnt = (await self.db.execute(cu_q)).scalar() or 0
+
+        # 2. Count from Order table directly for matching coupon_code (excluding cancelled)
+        ord_q = (
+            select(func.count(Order.id))
+            .where(
+                Order.user_id == user_id,
+                func.upper(func.trim(Order.coupon_code)) == code_upper,
+                Order.status.notin_(["Cancelled", "CANCELLED"])
+            )
+        )
+        ord_cnt = (await self.db.execute(ord_q)).scalar() or 0
+
+        return max(cu_cnt, ord_cnt)
+
+    async def _get_coupon_total_usage(self, coupon: Coupon) -> int:
+        code_upper = (coupon.code or "").strip().upper()
+
+        # 1. Count from CouponUsage relation (joining Coupon and outerjoining Order to exclude cancelled)
+        cu_q = (
+            select(func.count(CouponUsage.id))
+            .join(Coupon, CouponUsage.coupon_id == Coupon.id)
+            .outerjoin(Order, CouponUsage.order_id == Order.id)
+            .where(
+                or_(CouponUsage.coupon_id == coupon.id, func.upper(func.trim(Coupon.code)) == code_upper),
+                or_(Order.id.is_(None), Order.status.notin_(["Cancelled", "CANCELLED"]))
+            )
+        )
+        cu_cnt = (await self.db.execute(cu_q)).scalar() or 0
+
+        # 2. Count from Order table directly for matching coupon_code (excluding cancelled)
+        ord_q = (
+            select(func.count(Order.id))
+            .where(
+                func.upper(func.trim(Order.coupon_code)) == code_upper,
+                Order.status.notin_(["Cancelled", "CANCELLED"])
+            )
+        )
+        ord_cnt = (await self.db.execute(ord_q)).scalar() or 0
+
+        return max(cu_cnt, ord_cnt)
+
     async def get_user_coupons(self, user_id: str) -> list[UserCouponResponse]:
         """
         Get all coupons for the customer's 'My Coupons' page in the dashboard.
@@ -47,23 +106,10 @@ class CouponService:
                 continue
 
             # 2. Check user-specific usage limit (Per-user usage tracking, excluding cancelled orders)
-            user_usage = 0
-            if c.per_user_usage_limit > 0 and user_id and user_id != "guest":
-                user_usage_q = select(func.count(CouponUsage.id)).join(Order, CouponUsage.order_id == Order.id).where(
-                    CouponUsage.coupon_id == c.id,
-                    CouponUsage.user_id == user_id,
-                    Order.status.notin_(["Cancelled", "CANCELLED"])
-                )
-                user_usage = (await self.db.execute(user_usage_q)).scalar() or 0
+            user_usage = await self._get_coupon_user_usage(c, user_id)
 
             # 3. Check total usage limit (excluding cancelled orders)
-            total_usage = 0
-            if c.usage_limit > 0:
-                total_usage_q = select(func.count(CouponUsage.id)).join(Order, CouponUsage.order_id == Order.id).where(
-                    CouponUsage.coupon_id == c.id,
-                    Order.status.notin_(["Cancelled", "CANCELLED"])
-                )
-                total_usage = (await self.db.execute(total_usage_q)).scalar() or 0
+            total_usage = await self._get_coupon_total_usage(c)
 
             # 4. Dates & Active checks
             is_active_flag = bool(getattr(c, "is_active", True))
@@ -89,15 +135,18 @@ class CouponService:
                         if not user_id or str(user_id) not in allowed_users:
                             is_eligible_rule = False
 
-            # Determine dynamic status: Available / Used / Expired / Not Available
-            if not is_user_available:
+            # Determine dynamic status: Available / Used / Expired / Not Available / Inactive
+            if not is_active_flag:
+                status_str = "Inactive"
+                is_active = False
+            elif not is_total_available or not is_not_expired or not is_eligible_rule:
+                status_str = "Expired"
+                is_active = False
+            elif not is_user_available:
                 status_str = "Used"
                 is_active = False
             elif not is_started:
                 status_str = "Not Available"
-                is_active = False
-            elif not is_not_expired or not is_active_flag or not is_total_available or not is_eligible_rule:
-                status_str = "Expired"
                 is_active = False
             else:
                 status_str = "Available"
@@ -272,15 +321,13 @@ class CouponService:
             
         # Check total usage limit
         if coupon.usage_limit > 0:
-            total_usage_q = select(func.count(CouponUsage.id)).where(CouponUsage.coupon_id == coupon.id)
-            total_usage = (await self.db.execute(total_usage_q)).scalar() or 0
+            total_usage = await self._get_coupon_total_usage(coupon)
             if total_usage >= coupon.usage_limit:
                 return CouponValidationResponse(valid=False, code=code, message="Promo code usage limit reached.")
                 
         # Check per-user usage limit
-        if coupon.per_user_usage_limit > 0:
-            user_usage_q = select(func.count(CouponUsage.id)).where(CouponUsage.coupon_id == coupon.id, CouponUsage.user_id == user_id)
-            user_usage = (await self.db.execute(user_usage_q)).scalar() or 0
+        if coupon.per_user_usage_limit > 0 and user_id and user_id != "guest":
+            user_usage = await self._get_coupon_user_usage(coupon, user_id)
             if user_usage >= coupon.per_user_usage_limit:
                 return CouponValidationResponse(valid=False, code=code, message="You have already used this promo code.")
 

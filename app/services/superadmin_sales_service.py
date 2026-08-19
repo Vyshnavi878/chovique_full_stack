@@ -34,16 +34,27 @@ class SuperadminSalesService:
 
     async def get_sales_kpis(self) -> SalesKPICard:
         """Calculate overall sales KPI metrics comparing current month vs last month."""
-        now = datetime.now(timezone.utc)
-        curr_start = datetime(now.year, now.month, 1, 0, 0, 0, tzinfo=timezone.utc)
-        curr_end = datetime(now.year, now.month, now.day, 23, 59, 59, tzinfo=timezone.utc)
+        try:
+            from zoneinfo import ZoneInfo
+            tz_ist = ZoneInfo("Asia/Kolkata")
+        except Exception:
+            from dateutil.tz import gettz
+            tz_ist = gettz("Asia/Kolkata") or timezone.utc
 
-        if now.month == 1:
-            prev_start = datetime(now.year - 1, 12, 1, 0, 0, 0, tzinfo=timezone.utc)
-            prev_end = curr_start - timedelta(seconds=1)
+        now_ist = datetime.now(tz_ist)
+        curr_start_ist = datetime(now_ist.year, now_ist.month, 1, 0, 0, 0, tzinfo=tz_ist)
+        curr_end_ist = datetime(now_ist.year, now_ist.month, now_ist.day, 23, 59, 59, tzinfo=tz_ist)
+
+        curr_start = curr_start_ist.astimezone(timezone.utc)
+        curr_end = curr_end_ist.astimezone(timezone.utc)
+
+        if now_ist.month == 1:
+            prev_start_ist = datetime(now_ist.year - 1, 12, 1, 0, 0, 0, tzinfo=tz_ist)
         else:
-            prev_start = datetime(now.year, now.month - 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-            prev_end = curr_start - timedelta(seconds=1)
+            prev_start_ist = datetime(now_ist.year, now_ist.month - 1, 1, 0, 0, 0, tzinfo=tz_ist)
+
+        prev_start = prev_start_ist.astimezone(timezone.utc)
+        prev_end = curr_start - timedelta(seconds=1)
 
         valid_statuses = ["Paid", "Delivered", "Shipped", "Processing"]
 

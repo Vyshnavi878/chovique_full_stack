@@ -40,6 +40,10 @@ class OrderItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class OrderReturnPayload(BaseModel):
+    reason: Optional[str] = None
+
+
 class OrderResponse(BaseModel):
     id: str
     items: list[OrderItemResponse]
@@ -61,5 +65,9 @@ class OrderResponse(BaseModel):
     paymentMethod: str
     invoice_url: Optional[str] = None
     user_id: Optional[str] = None
+    is_cancellable: bool = False
+    is_returnable: bool = False
+    created_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
