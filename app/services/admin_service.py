@@ -71,6 +71,20 @@ from app.services.cloudinary_service import cloudinary_service
 logger = logging.getLogger(__name__)
 
 
+def _format_order_items_html(order) -> str:
+    items_html = ""
+    for item in getattr(order, "items", []) or []:
+        p_name = "Chovique Product"
+        if getattr(item, "product", None) and getattr(item.product, "name", None):
+            p_name = item.product.name
+        elif getattr(item, "product_name", None):
+            p_name = item.product_name
+        qty = getattr(item, "quantity", 1) or 1
+        price = float(getattr(item, "price", 0.0) or 0.0)
+        items_html += f"<li>{p_name} x {qty} (₹{price * qty:,.2f})</li>"
+    return items_html
+
+
 class AdminService:
 
     def __init__(self, db: AsyncSession):
@@ -778,22 +792,45 @@ class AdminService:
         # -- Email notifications (best-effort, never block the response) --
         try:
             user = await self.user_repo.get_by_id(order.user_id)
-            if user:
+            if user and user.email:
                 if new_status == "Shipped":
                     await resend_email.send_shipping_update(
                         email=user.email,
-                        name=user.full_name,
+                        name=user.full_name or "Valued Customer",
                         order_id=order.id,
                         tracking_number="TRACK-" + order.id[-6:],
                     )
                 elif new_status == "Cancelled":
+                    created_str = order.created_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(order, "created_at", None) else ""
+                    cancelled_str = order.cancelled_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(order, "cancelled_at", None) else ""
+                    items_html = _format_order_items_html(order)
                     await resend_email.send_cancellation(
                         email=user.email,
-                        name=user.full_name,
+                        name=user.full_name or "Valued Customer",
                         order_id=order.id,
+                        cancellation_reason=getattr(order, "cancellation_reason", None) or payload.notes or "Admin Action",
+                        order_total=float(order.total or 0.0),
+                        order_date=created_str,
+                        cancelled_at=cancelled_str,
+                        payment_method=str(order.payment_method or "UPI"),
+                        payment_status=str(getattr(order, "payment_status", "Cancelled") or "Cancelled"),
+                        order_items_html=items_html,
+                    )
+                elif new_status == "Delivered":
+                    delivered_str = order.delivered_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(order, "delivered_at", None) else ""
+                    items_html = _format_order_items_html(order)
+                    await resend_email.send_order_delivered(
+                        email=user.email,
+                        name=user.full_name or "Valued Customer",
+                        order_id=order.id,
+                        delivered_at=delivered_str,
+                        payment_method=str(order.payment_method or "UPI"),
+                        payment_status=str(getattr(order, "payment_status", "Paid") or "Paid"),
+                        order_total=float(order.total or 0.0),
+                        order_items_html=items_html,
                     )
         except Exception as email_err:
-            logger.warning("Order notification email failed for %s: %s", order_id, email_err)
+            logger.warning("Order notification email failed | Event: %s | Order: %s | Reason: %s", new_status.upper(), order_id, email_err)
 
         # Re-fetch to get fresh relationships
         refreshed = await self.order_repo.get_by_id(order_id)

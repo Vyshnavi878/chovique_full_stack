@@ -38,6 +38,20 @@ from app.schemas.user import (
 logger = logging.getLogger(__name__)
 
 
+def _format_order_items_html(order) -> str:
+    items_html = ""
+    for item in getattr(order, "items", []) or []:
+        p_name = "Chovique Product"
+        if getattr(item, "product", None) and getattr(item.product, "name", None):
+            p_name = item.product.name
+        elif getattr(item, "product_name", None):
+            p_name = item.product_name
+        qty = getattr(item, "quantity", 1) or 1
+        price = float(getattr(item, "price", 0.0) or 0.0)
+        items_html += f"<li>{p_name} x {qty} (₹{price * qty:,.2f})</li>"
+    return items_html
+
+
 class CustomerService:
 
     def __init__(self, db: AsyncSession):
@@ -627,6 +641,30 @@ class CustomerService:
         
         self.db.add(order)
         await self.db.commit()
+
+        # Trigger customer email notification on cancellation
+        try:
+            user = await self.user_repo.get_by_id(user_id)
+            if user and user.email:
+                from app.integrations.resend import resend_email
+                created_str = order.created_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(order, "created_at", None) else ""
+                cancelled_str = order.cancelled_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(order, "cancelled_at", None) else ""
+                items_html = _format_order_items_html(order)
+                await resend_email.send_cancellation(
+                    email=user.email,
+                    name=user.full_name or "Valued Customer",
+                    order_id=order.id,
+                    cancellation_reason=getattr(order, "cancellation_reason", None) or reason or "Customer Request",
+                    order_total=float(order.total or 0.0),
+                    order_date=created_str,
+                    cancelled_at=cancelled_str,
+                    payment_method=str(order.payment_method or "UPI"),
+                    payment_status=str(getattr(order, "payment_status", "Cancelled") or "Cancelled"),
+                    order_items_html=items_html,
+                )
+        except Exception as e_mail:
+            logger.warning("Order email notification failed | Event: ORDER_CANCELLED | Order: %s | Reason: %s", order.id, e_mail)
+
         return self._format_order_response(order)
 
     async def return_order(self, order_id: str, user_id: str, reason: str | None = None) -> OrderResponse | None:
@@ -673,6 +711,24 @@ class CustomerService:
             )
         except Exception as e:
             logger.warning(f"Failed to create return notification: {e}")
+
+        # Trigger customer email notification on return request
+        try:
+            user = await self.user_repo.get_by_id(user_id)
+            if user and user.email:
+                from app.integrations.resend import resend_email
+                returned_str = order.returned_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(order, "returned_at", None) else ""
+                items_html = _format_order_items_html(order)
+                await resend_email.send_return_request(
+                    email=user.email,
+                    name=user.full_name or "Valued Customer",
+                    order_id=order.id,
+                    return_requested_at=returned_str,
+                    return_reason=getattr(order, "return_reason", None) or reason or "Customer Request",
+                    return_items_html=items_html,
+                )
+        except Exception as e_mail:
+            logger.warning("Order email notification failed | Event: RETURN_REQUESTED | Order: %s | Reason: %s", order.id, e_mail)
 
         db_order = await self.order_repo.get_by_id(order.id)
         return self._format_order_response(db_order or order)

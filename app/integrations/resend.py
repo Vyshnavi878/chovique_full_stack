@@ -464,30 +464,125 @@ class ResendEmailIntegration:
         """
         return await self.send_email(email, subject, html)
 
-    async def send_order_delivered(self, email: str, name: str, order_id: str, delivered_at: str):
-        subject = f"Order Delivered – #{order_id}"
+    async def send_order_delivered(
+        self,
+        email: str,
+        name: str,
+        order_id: str,
+        delivered_at: str = "",
+        payment_method: str = "UPI",
+        payment_status: str = "Paid",
+        order_total: float = 0.0,
+        order_items_html: str = "",
+    ):
+        store_name = getattr(settings, "APP_NAME", "Chovique")
+        subject = f"Your Order Has Been Delivered – {order_id}"
+        items_block = f"<ul>{order_items_html}</ul>" if order_items_html else "<p>N/A</p>"
         html = f"""
-        <p>Hello {name},</p>
-        <p>Your order <strong>#{order_id}</strong> has been delivered successfully.</p>
-        <p><strong>Delivered On:</strong> {delivered_at}</p>
-        <p>Thank you for shopping with us.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
+        <p>Hi {name},</p>
+
+        <p>Great news! 🎉</p>
+
+        <p>Your order {order_id} has been successfully delivered.</p>
+
+        <p><strong>Order Details</strong></p>
+
+        <ul>
+            <li><strong>Order ID:</strong> {order_id}</li>
+            <li><strong>Delivered On:</strong> {delivered_at}</li>
+            <li><strong>Payment Method:</strong> {payment_method}</li>
+            <li><strong>Payment Status:</strong> {payment_status}</li>
+            <li><strong>Total Amount:</strong> ₹{order_total:,.2f}</li>
+        </ul>
+
+        <p><strong>Items Delivered:</strong></p>
+        {items_block}
+
+        <p>We hope you enjoy your chocolates! 🍫</p>
+
+        <p>If you experience any issue with your order, please contact our support team.</p>
+
+        <p>Thank you for choosing {store_name}.</p>
         """
         return await self.send_email(email, subject, html)
 
-    async def send_cancellation(self, email: str, name: str, order_id: str, cancellation_reason: str = "Customer Request", order_total: float = 0.0):
-        subject = f"Order Cancelled – #{order_id}"
+    async def send_cancellation(
+        self,
+        email: str,
+        name: str,
+        order_id: str,
+        cancellation_reason: str = "Customer Request",
+        order_total: float = 0.0,
+        order_date: str = "",
+        cancelled_at: str = "",
+        payment_method: str = "UPI",
+        payment_status: str = "Cancelled",
+        order_items_html: str = "",
+    ):
+        store_name = getattr(settings, "APP_NAME", "Chovique")
+        subject = f"Order Cancelled – {order_id}"
+        items_block = f"<ul>{order_items_html}</ul>" if order_items_html else "<p>N/A</p>"
         html = f"""
-        <p>Hello {name},</p>
-        <p>Your order <strong>#{order_id}</strong> has been cancelled.</p>
+        <p>Hi {name},</p>
+
+        <p>Your order {order_id} has been successfully cancelled.</p>
+
+        <p><strong>Order Details</strong></p>
+
         <ul>
-            <li><strong>Cancellation Reason:</strong> {cancellation_reason}</li>
-            {f'<li><strong>Order Amount:</strong> ₹{order_total:,.2f}</li>' if order_total > 0 else ''}
+            <li><strong>Order ID:</strong> {order_id}</li>
+            <li><strong>Order Date:</strong> {order_date}</li>
+            <li><strong>Cancellation Date:</strong> {cancelled_at}</li>
+            <li><strong>Payment Method:</strong> {payment_method}</li>
+            <li><strong>Payment Status:</strong> {payment_status}</li>
+            <li><strong>Total Amount:</strong> ₹{order_total:,.2f}</li>
         </ul>
-        <p>If a refund is applicable, you will receive a separate update.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
+
+        <p><strong>Items:</strong></p>
+        {items_block}
+
+        <p>If you have already made a payment, any applicable refund will be processed according to our existing refund policy.</p>
+
+        <p>Thank you for choosing {store_name}.</p>
+        """
+        return await self.send_email(email, subject, html)
+
+    async def send_return_request(
+        self,
+        email: str,
+        name: str,
+        order_id: str,
+        return_requested_at: str = "",
+        return_reason: str = "Customer Request",
+        return_items_html: str = "",
+    ):
+        store_name = getattr(settings, "APP_NAME", "Chovique")
+        subject = f"Return Request Received – {order_id}"
+        items_block = f"<ul>{return_items_html}</ul>" if return_items_html else "<p>N/A</p>"
+        html = f"""
+        <p>Hi {name},</p>
+
+        <p>We have successfully received your return request for order {order_id}.</p>
+
+        <p><strong>Return Details</strong></p>
+
+        <ul>
+            <li><strong>Order ID:</strong> {order_id}</li>
+            <li><strong>Return Requested On:</strong> {return_requested_at}</li>
+            <li><strong>Return Status:</strong> Return Requested</li>
+        </ul>
+
+        <p><strong>Items:</strong></p>
+        {items_block}
+
+        <p><strong>Return Reason:</strong><br/>
+        {return_reason or 'Customer Request'}</p>
+
+        <p>Our support team will review your request and update you with the next steps.</p>
+
+        <p>Please keep the product in its original condition and packaging, if applicable.</p>
+
+        <p>Thank you for shopping with {store_name}.</p>
         """
         return await self.send_email(email, subject, html)
 
