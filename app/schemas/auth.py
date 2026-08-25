@@ -238,7 +238,11 @@ class OTPSentResponse(BaseModel):
     expires_in: int
 
 
+from typing import Optional
+
 class AuthUserResponse(BaseModel):
     """Response for endpoints that return a token pair + user profile."""
     message: str
     user: UserResponse
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None

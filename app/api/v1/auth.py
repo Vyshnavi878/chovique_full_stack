@@ -80,14 +80,17 @@ def generate_csrf_token() -> str:
 
 
 def set_auth_cookies(response: Response, access_token: str, refresh_token: str, csrf_token: str | None = None):
+    is_prod = not settings.DEBUG
+    samesite_mode = "none" if is_prod else "lax"
+    secure_mode = is_prod
 
     # Access Token Cookie (HttpOnly)
     response.set_cookie(
         key="access_token",
         value=access_token,
         httponly=True,
-        secure=not settings.DEBUG,
-        samesite="lax",
+        secure=secure_mode,
+        samesite=samesite_mode,
         max_age=60 * settings.ACCESS_TOKEN_EXPIRE_MINUTES,
     )
 
@@ -96,8 +99,8 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str, 
         key="refresh_token",
         value=refresh_token,
         httponly=True,
-        secure=not settings.DEBUG,
-        samesite="lax",
+        secure=secure_mode,
+        samesite=samesite_mode,
         max_age=60 * 60 * 24 * settings.REFRESH_TOKEN_EXPIRE_DAYS,
     )
 
@@ -109,8 +112,8 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str, 
         key="csrf_token",
         value=csrf_token,
         httponly=False,
-        secure=not settings.DEBUG,
-        samesite="lax",
+        secure=secure_mode,
+        samesite=samesite_mode,
         max_age=60 * 60 * 24 * settings.REFRESH_TOKEN_EXPIRE_DAYS,
     )
     return csrf_token
@@ -123,12 +126,13 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str, 
 @router.get("/csrf", summary="Get CSRF Token")
 def get_csrf_token(response: Response):
     token = generate_csrf_token()
+    is_prod = not settings.DEBUG
     response.set_cookie(
         key="csrf_token",
         value=token,
         httponly=False,
-        secure=not settings.DEBUG,
-        samesite="lax",
+        secure=is_prod,
+        samesite="none" if is_prod else "lax",
     )
     return {"csrf_token": token}
 
@@ -202,6 +206,8 @@ async def verify_otp(
             result["message"],
             "user":
             UserResponse.from_orm_user(result["user"]),
+            "access_token": result["access_token"],
+            "refresh_token": result["refresh_token"],
         }
     except (InvalidOTPError, OTPExpiredError, MaxAttemptsExceededError) as e:
         _handle_otp_exception(e)
@@ -238,6 +244,8 @@ async def login(
             "message":
             result["message"],
             "user": UserResponse.from_orm_user(result["user"]),
+            "access_token": result["access_token"],
+            "refresh_token": result["refresh_token"],
         }
 
     except ValueError as e:
@@ -272,6 +280,8 @@ async def google_login(
             result["message"],
             "user":
             UserResponse.from_orm_user(result["user"]),
+            "access_token": result["access_token"],
+            "refresh_token": result["refresh_token"],
         }
     except ValueError as e:
         raise HTTPException(
@@ -308,6 +318,8 @@ async def set_password(
             result["message"],
             "user":
             UserResponse.from_orm_user(result["user"]),
+            "access_token": result["access_token"],
+            "refresh_token": result["refresh_token"],
         }
 
     except ValueError as e:
@@ -476,14 +488,27 @@ async def logout(
             access_token=extracted_access_token
         )
         # Delete cookies
+        is_prod = not settings.DEBUG
+        samesite_mode = "none" if is_prod else "lax"
+        secure_mode = is_prod
+
         response.delete_cookie(
-            key="access_token"
+            key="access_token",
+            httponly=True,
+            secure=secure_mode,
+            samesite=samesite_mode,
         )
         response.delete_cookie(
-            key="refresh_token"
+            key="refresh_token",
+            httponly=True,
+            secure=secure_mode,
+            samesite=samesite_mode,
         )
         response.delete_cookie(
-            key="csrf_token"
+            key="csrf_token",
+            httponly=False,
+            secure=secure_mode,
+            samesite=samesite_mode,
         )
         return {
             "message":
