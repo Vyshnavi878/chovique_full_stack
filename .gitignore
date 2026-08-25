@@ -2,5 +2,8 @@
 *.py[cod]
 *.sqlite3
 .env
+.env.*
+!.env_example
+!.env.example
 .venv/
 uploads/*
