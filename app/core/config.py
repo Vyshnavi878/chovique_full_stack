@@ -7,7 +7,7 @@ Loads environment variables from .env using Pydantic Settings.
 from functools import lru_cache
 from typing import List
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -111,8 +111,8 @@ class Settings(BaseSettings):
     # =====================================================
     # Superadmin Credentials
     # =====================================================
-    SUPERADMIN_EMAIL: str
-    SUPERADMIN_PASSWORD: str
+    SUPERADMIN_EMAIL: str = Field(validation_alias=AliasChoices("SUPERADMIN_EMAIL", "SUPER_ADMIN_EMAIL"))
+    SUPERADMIN_PASSWORD: str = Field(validation_alias=AliasChoices("SUPERADMIN_PASSWORD", "SUPER_ADMIN_PASSWORD"))
 
 
 

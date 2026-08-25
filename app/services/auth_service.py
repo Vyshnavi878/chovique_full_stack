@@ -1,4 +1,5 @@
 import logging
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -255,36 +256,6 @@ class AuthService:
 
         logger.info("Login attempt for email=%s", request.email)
 
-        # Find user
-
-        user = await self.user_repo.get_by_email(
-            request.email
-        )
-
-
-        if not user:
-            raise ValueError(
-                "Invalid email or password."
-            )
-
-
-        # Check active account
-
-        if not user.is_active:
-            raise ValueError(
-                "Your account is deactivated by the administration due to some issues. Leave a request to support.chovique.com to activate your account."
-            )
-
-
-        # Google users don't have password
-
-        if not user.hashed_password:
-
-            raise ValueError(
-                "Please login using Google."
-            )
-
-
         ps_repo = PlatformSettingsRepository(self.db)
         ps = await ps_repo.get()
 
@@ -304,42 +275,124 @@ class AuthService:
         except Exception:
             pass
 
-        # Verify password
-        if not verify_password(
-            request.password,
-            user.hashed_password,
-        ):
-            try:
-                from app.db.redis import redis_client
-                attempts = await redis_client.incr(attempts_key)
-                await redis_client.expire(attempts_key, 3600)
-                if attempts >= ps.max_login_attempts:
-                    lockout_secs = ps.account_lockout_duration * 60
-                    await redis_client.setex(lockout_key, lockout_secs, "locked")
-                    await redis_client.delete(attempts_key)
+        # Check if login is for the configured Super Admin
+        is_superadmin_attempt = bool(
+            settings.SUPERADMIN_EMAIL
+            and request.email.strip().lower() == settings.SUPERADMIN_EMAIL.strip().lower()
+        )
 
-                    try:
-                        from app.integrations.resend import resend_email
-                        from app.core.config import settings as _settings
-                        await resend_email.send_superadmin_security_alert(
-                            super_admin_email=_settings.SUPERADMIN_EMAIL,
-                            super_admin_name="Super Admin",
-                            admin_email=request.email,
-                            security_event=f"Account locked after {ps.max_login_attempts} failed login attempts.",
-                            detected_at=datetime.now().strftime("%d %b %Y, %I:%M %p"),
-                        )
-                    except Exception:
-                        pass
+        if is_superadmin_attempt:
+            # Validate Super Admin password securely against environment configuration
+            if not (settings.SUPERADMIN_PASSWORD and secrets.compare_digest(request.password, settings.SUPERADMIN_PASSWORD)):
+                try:
+                    from app.db.redis import redis_client
+                    attempts = await redis_client.incr(attempts_key)
+                    await redis_client.expire(attempts_key, 3600)
+                    if attempts >= ps.max_login_attempts:
+                        lockout_secs = ps.account_lockout_duration * 60
+                        await redis_client.setex(lockout_key, lockout_secs, "locked")
+                        await redis_client.delete(attempts_key)
 
-                    raise ValueError(f"Too many failed login attempts. Account locked for {ps.account_lockout_duration} minutes.")
-            except ValueError:
-                raise
-            except Exception:
-                pass
+                        try:
+                            from app.integrations.resend import resend_email
+                            from app.core.config import settings as _settings
+                            await resend_email.send_superadmin_security_alert(
+                                super_admin_email=_settings.SUPERADMIN_EMAIL,
+                                super_admin_name="Super Admin",
+                                admin_email=request.email,
+                                security_event=f"Account locked after {ps.max_login_attempts} failed login attempts.",
+                                detected_at=datetime.now().strftime("%d %b %Y, %I:%M %p"),
+                            )
+                        except Exception:
+                            pass
 
-            raise ValueError(
-                "Invalid email or password."
+                        raise ValueError(f"Too many failed login attempts. Account locked for {ps.account_lockout_duration} minutes.")
+                except ValueError:
+                    raise
+                except Exception:
+                    pass
+
+                raise ValueError("Invalid email or password.")
+
+            # Super Admin credentials valid: ensure user record exists in database for JWT / roles / foreign keys
+            user = await self.user_repo.get_by_email(request.email)
+            if not user:
+                user = await self.user_repo.create(
+                    email=settings.SUPERADMIN_EMAIL,
+                    hashed_password=hash_password(settings.SUPERADMIN_PASSWORD),
+                    full_name="Enterprise Chief",
+                    role="superadmin",
+                    is_email_verified=True,
+                    is_active=True,
+                )
+                await self.db.commit()
+            else:
+                if not user.is_active:
+                    raise ValueError(
+                        "Your account is deactivated by the administration due to some issues. Leave a request to support.chovique.com to activate your account."
+                    )
+                if user.role != "superadmin":
+                    user.role = "superadmin"
+                    await self.db.commit()
+        else:
+            # Find user from database
+            user = await self.user_repo.get_by_email(
+                request.email
             )
+
+            if not user:
+                raise ValueError(
+                    "Invalid email or password."
+                )
+
+            # Check active account
+            if not user.is_active:
+                raise ValueError(
+                    "Your account is deactivated by the administration due to some issues. Leave a request to support.chovique.com to activate your account."
+                )
+
+            # Google users don't have password
+            if not user.hashed_password:
+                raise ValueError(
+                    "Please login using Google."
+                )
+
+            # Verify password
+            if not verify_password(
+                request.password,
+                user.hashed_password,
+            ):
+                try:
+                    from app.db.redis import redis_client
+                    attempts = await redis_client.incr(attempts_key)
+                    await redis_client.expire(attempts_key, 3600)
+                    if attempts >= ps.max_login_attempts:
+                        lockout_secs = ps.account_lockout_duration * 60
+                        await redis_client.setex(lockout_key, lockout_secs, "locked")
+                        await redis_client.delete(attempts_key)
+
+                        try:
+                            from app.integrations.resend import resend_email
+                            from app.core.config import settings as _settings
+                            await resend_email.send_superadmin_security_alert(
+                                super_admin_email=_settings.SUPERADMIN_EMAIL,
+                                super_admin_name="Super Admin",
+                                admin_email=request.email,
+                                security_event=f"Account locked after {ps.max_login_attempts} failed login attempts.",
+                                detected_at=datetime.now().strftime("%d %b %Y, %I:%M %p"),
+                            )
+                        except Exception:
+                            pass
+
+                        raise ValueError(f"Too many failed login attempts. Account locked for {ps.account_lockout_duration} minutes.")
+                except ValueError:
+                    raise
+                except Exception:
+                    pass
+
+                raise ValueError(
+                    "Invalid email or password."
+                )
 
         # Success: clear lockout counters
         try:

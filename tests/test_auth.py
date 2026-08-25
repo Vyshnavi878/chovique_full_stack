@@ -385,6 +385,49 @@ class TestLogin:
         )
         assert response.status_code == 400
 
+    async def test_superadmin_login_success_fresh_db(self, client: AsyncClient):
+        from app.core.config import settings
+        from tests.conftest import TestSessionLocal
+        from sqlalchemy import select
+        from app.models.user import User
+
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": settings.SUPERADMIN_EMAIL,
+                "password": settings.SUPERADMIN_PASSWORD,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["message"] == "Login successful."
+        assert data["user"]["role"] == "superadmin"
+        assert data["user"]["email"] == settings.SUPERADMIN_EMAIL
+        assert "access_token" in response.cookies
+
+        # Verify user record exists in database
+        async with TestSessionLocal() as session:
+            result = await session.execute(
+                select(User).where(User.email == settings.SUPERADMIN_EMAIL)
+            )
+            user = result.scalar_one_or_none()
+            assert user is not None
+            assert user.role == "superadmin"
+            assert user.is_active is True
+
+    async def test_superadmin_login_wrong_password(self, client: AsyncClient):
+        from app.core.config import settings
+
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": settings.SUPERADMIN_EMAIL,
+                "password": "WrongSuperAdminPassword999!",
+            },
+        )
+        assert response.status_code == 400
+        assert "Invalid email or password" in response.json()["detail"]
+
 
 # ==========================================================
 # Forgot Password
