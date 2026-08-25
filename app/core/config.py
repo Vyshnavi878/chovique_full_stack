@@ -72,8 +72,11 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             if value.startswith("[") and value.endswith("]"):
                 import json
-                return json.loads(value)
-            return [origin.strip() for origin in value.split(",") if origin.strip()]
+                origins = json.loads(value)
+                return [orig.strip().rstrip("/") for orig in origins if orig.strip()]
+            return [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
+        if isinstance(value, list):
+            return [orig.strip().rstrip("/") for orig in value if isinstance(orig, str) and orig.strip()]
         return value
 
     # =====================================================
