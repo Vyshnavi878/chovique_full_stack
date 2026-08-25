@@ -789,48 +789,71 @@ class AdminService:
         except Exception as notif_err:
             logger.warning("Failed to create in-app order notification for %s: %s", order_id, notif_err)
 
-        # -- Email notifications (best-effort, never block the response) --
+        # -- Email notifications (best-effort, dispatched non-blockingly) --
         try:
+            import asyncio
             user = await self.user_repo.get_by_id(order.user_id)
             if user and user.email:
-                if new_status == "Shipped":
-                    await resend_email.send_shipping_update(
-                        email=user.email,
-                        name=user.full_name or "Valued Customer",
-                        order_id=order.id,
-                        tracking_number="TRACK-" + order.id[-6:],
+                if new_status == "Processing":
+                    asyncio.create_task(
+                        resend_email.send_order_processing(
+                            email=user.email,
+                            name=user.full_name or "Valued Customer",
+                            order_id=order.id,
+                        )
+                    )
+                elif new_status == "Shipped":
+                    asyncio.create_task(
+                        resend_email.send_shipping_update(
+                            email=user.email,
+                            name=user.full_name or "Valued Customer",
+                            order_id=order.id,
+                            tracking_number="TRACK-" + order.id[-6:],
+                        )
+                    )
+                elif new_status == "Out for Delivery":
+                    asyncio.create_task(
+                        resend_email.send_out_for_delivery(
+                            email=user.email,
+                            name=user.full_name or "Valued Customer",
+                            order_id=order.id,
+                        )
                     )
                 elif new_status == "Cancelled":
                     created_str = order.created_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(order, "created_at", None) else ""
                     cancelled_str = order.cancelled_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(order, "cancelled_at", None) else ""
                     items_html = _format_order_items_html(order)
-                    await resend_email.send_cancellation(
-                        email=user.email,
-                        name=user.full_name or "Valued Customer",
-                        order_id=order.id,
-                        cancellation_reason=getattr(order, "cancellation_reason", None) or payload.notes or "Admin Action",
-                        order_total=float(order.total or 0.0),
-                        order_date=created_str,
-                        cancelled_at=cancelled_str,
-                        payment_method=str(order.payment_method or "UPI"),
-                        payment_status=str(getattr(order, "payment_status", "Cancelled") or "Cancelled"),
-                        order_items_html=items_html,
+                    asyncio.create_task(
+                        resend_email.send_cancellation(
+                            email=user.email,
+                            name=user.full_name or "Valued Customer",
+                            order_id=order.id,
+                            cancellation_reason=getattr(order, "cancellation_reason", None) or payload.notes or "Admin Action",
+                            order_total=float(order.total or 0.0),
+                            order_date=created_str,
+                            cancelled_at=cancelled_str,
+                            payment_method=str(order.payment_method or "UPI"),
+                            payment_status=str(getattr(order, "payment_status", "Cancelled") or "Cancelled"),
+                            order_items_html=items_html,
+                        )
                     )
                 elif new_status == "Delivered":
                     delivered_str = order.delivered_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(order, "delivered_at", None) else ""
                     items_html = _format_order_items_html(order)
-                    await resend_email.send_order_delivered(
-                        email=user.email,
-                        name=user.full_name or "Valued Customer",
-                        order_id=order.id,
-                        delivered_at=delivered_str,
-                        payment_method=str(order.payment_method or "UPI"),
-                        payment_status=str(getattr(order, "payment_status", "Paid") or "Paid"),
-                        order_total=float(order.total or 0.0),
-                        order_items_html=items_html,
+                    asyncio.create_task(
+                        resend_email.send_order_delivered(
+                            email=user.email,
+                            name=user.full_name or "Valued Customer",
+                            order_id=order.id,
+                            delivered_at=delivered_str,
+                            payment_method=str(order.payment_method or "UPI"),
+                            payment_status=str(getattr(order, "payment_status", "Paid") or "Paid"),
+                            order_total=float(order.total or 0.0),
+                            order_items_html=items_html,
+                        )
                     )
         except Exception as email_err:
-            logger.warning("Order notification email failed | Event: %s | Order: %s | Reason: %s", new_status.upper(), order_id, email_err)
+            logger.warning("Order notification email dispatch failed | Event: %s | Order: %s | Reason: %s", new_status.upper(), order_id, email_err)
 
         # Re-fetch to get fresh relationships
         refreshed = await self.order_repo.get_by_id(order_id)

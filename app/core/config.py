@@ -107,6 +107,17 @@ class Settings(BaseSettings):
     MAX_OTP_RESEND_ATTEMPTS: int = 3
     OTP_RESEND_LOCKOUT_SECONDS: int = 600
 
+    @field_validator("OTP_EXPIRE_SECONDS", mode="before")
+    @classmethod
+    def parse_otp_expire_seconds(cls, v):
+        if v is None or v == "":
+            return 300
+        try:
+            val = int(v)
+            return max(val, 300)
+        except (ValueError, TypeError):
+            return 300
+
     # =====================================================
     # Google OAuth
     # =====================================================

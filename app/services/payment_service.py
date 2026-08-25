@@ -182,19 +182,22 @@ class PaymentService:
 
             await self.db.commit()
 
-            # Send Email Confirmation
+            # Send Email Confirmation (non-blocking background dispatch)
             try:
+                import asyncio
                 user = await self.user_repo.get_by_id(payment.user_id)
                 if user and user.email:
-                    await resend_email.send_order_confirmation(
-                        email=user.email,
-                        name=user.full_name,
-                        order_id=order.id,
-                        total=order.total,
-                        payment_status=order.payment_status,
+                    asyncio.create_task(
+                        resend_email.send_order_confirmation(
+                            email=user.email,
+                            name=user.full_name or "Valued Customer",
+                            order_id=order.id,
+                            total=order.total,
+                            payment_status=order.payment_status,
+                        )
                     )
             except Exception as e:
-                logger.error("Failed sending email confirmation for order %s: %s", order.id, e)
+                logger.warning("Failed triggering email confirmation for order %s: %s", order.id, e)
 
             # Generate Invoice
             try:

@@ -229,10 +229,13 @@ class AuthService:
             logger.warning("Failed to create welcome notification: %s", notif_err)
 
         try:
+            import asyncio
             from app.integrations.resend import resend_email
-            await resend_email.send_welcome(email=user.email, name=user.full_name or "Chocolate Lover")
+            asyncio.create_task(
+                resend_email.send_welcome(email=user.email, name=user.full_name or "Chocolate Lover")
+            )
         except Exception as email_err:
-            logger.warning("Failed to send welcome email: %s", email_err)
+            logger.warning("Failed to dispatch welcome email: %s", email_err)
 
         return {
 

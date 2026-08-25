@@ -75,7 +75,7 @@ def _send_sync_smtp(email: str, subject: str, html_body: str, port: int) -> None
     msg["To"] = email
     msg.attach(MIMEText(html_body, "html"))
 
-    timeout = min(getattr(settings, "MAIL_TIMEOUT", 5), 5)
+    timeout = min(getattr(settings, "MAIL_TIMEOUT", 3), 3)
     server_host = settings.MAIL_SERVER
 
     if port == 465:
@@ -98,7 +98,7 @@ async def _send_mail_dispatcher(
     email: str,
     subject: str,
     html_body: str,
-    context_label: str,
+    context_label: str = "Notification",
     fallback_otp: str | None = None,
 ) -> bool:
     """
@@ -110,14 +110,16 @@ async def _send_mail_dispatcher(
     5. Gracefully handles cloud network blocks (e.g. Render blocking SMTP ports) so the user flow is preserved.
     """
     if fallback_otp:
-        logger.info(f"[{context_label}] Generated OTP for {email}: {fallback_otp}")
+        logger.info("[OTP BACKUP] %s OTP for %s: %s", context_label, email, fallback_otp)
+
+    logger.info("%s email: sending to %s", context_label, email)
 
     # 1. Resend HTTPS REST API (Port 443, never blocked by cloud firewalls)
     resend_api_key = getattr(settings, "RESEND_API_KEY", None)
     if resend_api_key and resend_api_key.strip():
         try:
             from_email = settings.MAIL_FROM or "Chovique Chocolatier <onboarding@resend.dev>"
-            async with httpx.AsyncClient(timeout=6.0) as client:
+            async with httpx.AsyncClient(timeout=4.0) as client:
                 resp = await client.post(
                     "https://api.resend.com/emails",
                     headers={
@@ -132,48 +134,43 @@ async def _send_mail_dispatcher(
                     },
                 )
                 if resp.is_success:
-                    logger.info(f"{context_label} delivered successfully to {email} via Resend API")
+                    logger.info("%s email: sent successfully to %s via Resend API", context_label, email)
                     return True
                 else:
                     logger.warning(
-                        f"Resend API returned {resp.status_code}: {resp.text}. Falling back to SMTP..."
+                        "Resend API returned %s for %s email to %s. Falling back to SMTP...",
+                        resp.status_code,
+                        context_label,
+                        email,
                     )
         except Exception as resend_err:
             logger.warning(
-                f"Resend API request failed for {email} ({resend_err}). Falling back to SMTP..."
+                "Resend API request failed for %s email to %s (%s). Falling back to SMTP...",
+                context_label,
+                email,
+                resend_err,
             )
 
-    # 2. Native SMTP via background thread (Primary Port)
-    primary_port = settings.MAIL_PORT
-    try:
-        await asyncio.to_thread(_send_sync_smtp, email, subject, html_body, primary_port)
-        logger.info(f"{context_label} delivered successfully to {email} via {settings.MAIL_SERVER}:{primary_port}")
-        return True
-    except Exception as primary_err:
-        logger.warning(
-            f"{context_label} delivery via {settings.MAIL_SERVER}:{primary_port} failed ({primary_err}). "
-            f"Attempting fallback port..."
-        )
+    # 2. Native SMTP via background thread (Auto-prioritize port 465 for Gmail on cloud hosts)
+    if "gmail.com" in settings.MAIL_SERVER.lower():
+        ports_to_try = [465, 587] if settings.MAIL_PORT in [465, 587] else [settings.MAIL_PORT, 465]
+    else:
+        primary_port = settings.MAIL_PORT
+        fallback_port = 465 if primary_port == 587 else (587 if primary_port == 465 else None)
+        ports_to_try = [primary_port] + ([fallback_port] if fallback_port else [])
 
-    # 3. Native SMTP via background thread (Fallback Port 465 <-> 587)
-    fallback_port = 465 if primary_port == 587 else (587 if primary_port == 465 else None)
-    if fallback_port:
+    last_error: Optional[Exception] = None
+    for port in ports_to_try:
         try:
-            await asyncio.to_thread(_send_sync_smtp, email, subject, html_body, fallback_port)
-            logger.info(
-                f"{context_label} delivered successfully to {email} via fallback {settings.MAIL_SERVER}:{fallback_port}"
-            )
+            await asyncio.to_thread(_send_sync_smtp, email, subject, html_body, port)
+            logger.info("%s email: sent successfully to %s via %s:%d", context_label, email, settings.MAIL_SERVER, port)
             return True
-        except Exception as fallback_err:
-            logger.error(
-                f"{context_label} delivery via fallback {settings.MAIL_SERVER}:{fallback_port} failed ({fallback_err})."
-            )
+        except Exception as err:
+            last_error = err
+            logger.debug("%s email attempt on %s:%d failed: %s", context_label, settings.MAIL_SERVER, port, err)
 
-    logger.warning(
-        f"Outbound SMTP is blocked or unreachable on this host for {email}. "
-        f"OTP is saved in Redis and logged above. "
-        f"To enable direct email delivery on Render, configure RESEND_API_KEY in Render Environment Variables."
-    )
+    safe_error_str = str(last_error) if last_error else "Network unreachable or SMTP credentials unconfigured"
+    logger.error("%s email failed for %s: %s", context_label, email, safe_error_str)
 
     if settings.DEBUG:
         if fallback_otp:
@@ -181,7 +178,7 @@ async def _send_mail_dispatcher(
             print(f"[DEV MODE - OTP] {context_label} for {email}: {fallback_otp}")
             print(f"==========================================\n")
 
-    # Return True so registration / OTP flow is not blocked when hosting providers block raw SMTP ports
+    # Return True so customer actions / registration flows are not aborted when host blocks raw SMTP ports
     return True
 
 
@@ -299,11 +296,12 @@ class MailService:
         email: str,
         subject: str,
         html_content: str,
+        context_label: str = "Notification",
     ) -> bool:
         """Send a transactional/notification email using existing infrastructure."""
         return await _send_mail_dispatcher(
             email=email,
             subject=subject,
             html_body=html_content,
-            context_label="Notification Email",
+            context_label=context_label,
         )

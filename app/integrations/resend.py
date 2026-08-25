@@ -25,17 +25,19 @@ class ResendEmailIntegration:
         subject: str,
         html_content: str,
         text_content: Optional[str] = None,
+        context_label: str = "Notification",
     ) -> bool:
-        """Send a single email via existing SMTP infrastructure."""
+        """Send a single email via existing MailService infrastructure."""
         try:
             from app.services.mail_service import MailService
             return await MailService.send_generic_email(
                 email=to_email,
                 subject=subject,
                 html_content=html_content,
+                context_label=context_label,
             )
         except Exception as e:
-            logger.error("Failed to send SMTP email to %s: %s", to_email, e)
+            logger.error("Failed to send %s email to %s: %s", context_label, to_email, e)
             return False
 
     # ==========================================================
@@ -367,7 +369,7 @@ class ResendEmailIntegration:
         <br/>
         <p>Regards,<br/>{self.platform_name} Team</p>
         """
-        return await self.send_email(email, subject, html)
+        return await self.send_email(email, subject, html, context_label="Welcome")
 
     async def send_order_confirmation(self, email: str, name: str, order_id: str, total: float, order_date: str = "", payment_status: str = "Pending"):
         p_status = str(payment_status or "Pending").strip()
@@ -393,7 +395,7 @@ class ResendEmailIntegration:
         <br/>
         <p>Regards,<br/>{self.platform_name} Team</p>
         """
-        return await self.send_email(email, subject, html)
+        return await self.send_email(email, subject, html, context_label="Order confirmation")
 
     async def send_payment_successful(self, email: str, name: str, order_id: str, amount: float, payment_method: str, payment_date: str):
         subject = f"Payment Successful – Order #{order_id}"
@@ -409,7 +411,7 @@ class ResendEmailIntegration:
         <br/>
         <p>Regards,<br/>{self.platform_name} Team</p>
         """
-        return await self.send_email(email, subject, html)
+        return await self.send_email(email, subject, html, context_label="Payment success")
 
     async def send_payment_failed(self, email: str, name: str, order_id: str, amount: float, failure_reason: str):
         subject = f"Payment Failed – Order #{order_id}"
@@ -424,7 +426,7 @@ class ResendEmailIntegration:
         <br/>
         <p>Regards,<br/>{self.platform_name} Team</p>
         """
-        return await self.send_email(email, subject, html)
+        return await self.send_email(email, subject, html, context_label="Payment failure")
 
     async def send_order_processing(self, email: str, name: str, order_id: str):
         subject = f"Your Order Is Being Processed – #{order_id}"
@@ -435,7 +437,7 @@ class ResendEmailIntegration:
         <br/>
         <p>Regards,<br/>{self.platform_name} Team</p>
         """
-        return await self.send_email(email, subject, html)
+        return await self.send_email(email, subject, html, context_label="Order processing")
 
     async def send_shipping_update(self, email: str, name: str, order_id: str, tracking_number: str, courier_name: str = "Standard Shipping", estimated_delivery: str = "3-5 Business Days"):
         subject = f"Your Order Has Been Shipped – #{order_id}"
@@ -450,7 +452,7 @@ class ResendEmailIntegration:
         <br/>
         <p>Regards,<br/>{self.platform_name} Team</p>
         """
-        return await self.send_email(email, subject, html)
+        return await self.send_email(email, subject, html, context_label="Order shipped")
 
     async def send_out_for_delivery(self, email: str, name: str, order_id: str, estimated_delivery: str = "Today"):
         subject = f"Your Order Is Out for Delivery – #{order_id}"
@@ -462,7 +464,7 @@ class ResendEmailIntegration:
         <br/>
         <p>Regards,<br/>{self.platform_name} Team</p>
         """
-        return await self.send_email(email, subject, html)
+        return await self.send_email(email, subject, html, context_label="Out for delivery")
 
     async def send_order_delivered(
         self,
@@ -504,7 +506,7 @@ class ResendEmailIntegration:
 
         <p>Thank you for choosing {store_name}.</p>
         """
-        return await self.send_email(email, subject, html)
+        return await self.send_email(email, subject, html, context_label="Order delivered")
 
     async def send_cancellation(
         self,
@@ -545,7 +547,7 @@ class ResendEmailIntegration:
 
         <p>Thank you for choosing {store_name}.</p>
         """
-        return await self.send_email(email, subject, html)
+        return await self.send_email(email, subject, html, context_label="Order cancellation")
 
     async def send_return_request(
         self,
@@ -584,7 +586,7 @@ class ResendEmailIntegration:
 
         <p>Thank you for shopping with {store_name}.</p>
         """
-        return await self.send_email(email, subject, html)
+        return await self.send_email(email, subject, html, context_label="Return request")
 
     async def send_refund_initiated(self, email: str, name: str, order_id: str, refund_amount: float, initiated_at: str):
         subject = f"Refund Initiated – Order #{order_id}"
@@ -599,7 +601,7 @@ class ResendEmailIntegration:
         <br/>
         <p>Regards,<br/>{self.platform_name} Team</p>
         """
-        return await self.send_email(email, subject, html)
+        return await self.send_email(email, subject, html, context_label="Refund initiated")
 
     async def send_refund_notification(self, email: str, name: str, order_id: str, amount: float, refund_date: str = "", refund_reference: str = ""):
         subject = f"Refund Completed – Order #{order_id}"
@@ -614,7 +616,7 @@ class ResendEmailIntegration:
         <br/>
         <p>Regards,<br/>{self.platform_name} Team</p>
         """
-        return await self.send_email(email, subject, html)
+        return await self.send_email(email, subject, html, context_label="Refund")
 
     async def send_coins_credited(self, email: str, name: str, coins_earned: int, coin_balance: int, credited_at: str):
         subject = "Coins Credited to Your Account"
@@ -629,7 +631,7 @@ class ResendEmailIntegration:
         <br/>
         <p>Regards,<br/>{self.platform_name} Team</p>
         """
-        return await self.send_email(email, subject, html)
+        return await self.send_email(email, subject, html, context_label="Coins credit")
 
     async def send_coins_used(self, email: str, name: str, coins_used: int, coin_balance: int, order_id: str):
         subject = "Coins Used Successfully"
@@ -643,7 +645,7 @@ class ResendEmailIntegration:
         <br/>
         <p>Regards,<br/>{self.platform_name} Team</p>
         """
-        return await self.send_email(email, subject, html)
+        return await self.send_email(email, subject, html, context_label="Coins used")
 
     async def send_coins_restored(self, email: str, name: str, coins_restored: int, coin_balance: int, restored_at: str):
         subject = "Coins Restored to Your Account"
@@ -657,7 +659,7 @@ class ResendEmailIntegration:
         <br/>
         <p>Regards,<br/>{self.platform_name} Team</p>
         """
-        return await self.send_email(email, subject, html)
+        return await self.send_email(email, subject, html, context_label="Coins restored")
 
     async def send_ticket_created(self, email: str, name: str, ticket_id: str, category: str, description: str, created_at: str = ""):
         subject = "Support Request Received"
@@ -673,7 +675,7 @@ class ResendEmailIntegration:
         <br/>
         <p>Regards,<br/>{self.platform_name} Support Team</p>
         """
-        return await self.send_email(email, subject, html)
+        return await self.send_email(email, subject, html, context_label="Support ticket created")
 
     async def send_ticket_updated(self, email: str, name: str, ticket_id: str, support_subject: str, status: str, support_response: str):
         subject = f"Update on Support Request #{ticket_id[:8]}"
@@ -690,7 +692,7 @@ class ResendEmailIntegration:
         <br/>
         <p>Regards,<br/>{self.platform_name} Support Team</p>
         """
-        return await self.send_email(email, subject, html)
+        return await self.send_email(email, subject, html, context_label="Support ticket updated")
 
 
 resend_email = ResendEmailIntegration()

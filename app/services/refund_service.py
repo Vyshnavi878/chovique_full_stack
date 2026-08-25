@@ -76,15 +76,21 @@ class RefundService:
         order.payment_status = "Refunded" if refund_amount >= order.total else "Partially Refunded"
         await self.db.commit()
 
-        # Send refund notification email & in-app notification
+        # Send refund notification email (non-blocking) & in-app notification
         user = await self.user_repo.get_by_id(order.user_id)
-        if user:
-            await resend_email.send_refund_notification(
-                email=user.email,
-                name=user.full_name,
-                order_id=order.id,
-                amount=refund_amount,
-            )
+        if user and user.email:
+            try:
+                import asyncio
+                asyncio.create_task(
+                    resend_email.send_refund_notification(
+                        email=user.email,
+                        name=user.full_name or "Valued Customer",
+                        order_id=order.id,
+                        amount=refund_amount,
+                    )
+                )
+            except Exception as email_err:
+                logger.warning("Failed to dispatch refund email notification: %s", email_err)
             try:
                 from app.repositories.notification_repository import NotificationRepository
                 notif_repo = NotificationRepository(self.db)
