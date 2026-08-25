@@ -111,8 +111,8 @@ class Settings(BaseSettings):
     # =====================================================
     # Superadmin Credentials
     # =====================================================
-    SUPERADMIN_EMAIL: str = "superadmin@chovique.com"
-    SUPERADMIN_PASSWORD: str = "SuperAdmin123!"
+    SUPERADMIN_EMAIL: str
+    SUPERADMIN_PASSWORD: str
 
 
 

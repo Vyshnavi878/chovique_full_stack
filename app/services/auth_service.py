@@ -320,8 +320,9 @@ class AuthService:
 
                     try:
                         from app.integrations.resend import resend_email
+                        from app.core.config import settings as _settings
                         await resend_email.send_superadmin_security_alert(
-                            super_admin_email="superadmin@chovique.com",
+                            super_admin_email=_settings.SUPERADMIN_EMAIL,
                             super_admin_name="Super Admin",
                             admin_email=request.email,
                             security_event=f"Account locked after {ps.max_login_attempts} failed login attempts.",

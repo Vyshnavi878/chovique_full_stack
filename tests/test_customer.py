@@ -9,7 +9,7 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from httpx import AsyncClient
 
-from app.db.seed_data import seed_database
+from app.services.superadmin_service import ensure_superadmin_exists
 from app.models.coupon import Coupon
 from tests.conftest import TestSessionLocal
 
@@ -22,7 +22,7 @@ from app.models.product import Product
 
 async def _seed():
     async with TestSessionLocal() as session:
-        await seed_database(session)
+        await ensure_superadmin_exists(session)
         res = await session.execute(select(Coupon).where(Coupon.code == "CHOVIQUE10"))
         if not res.scalar_one_or_none():
             coupon = Coupon(

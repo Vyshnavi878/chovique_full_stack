@@ -15,7 +15,6 @@ from app.core.exceptions import (
     OTPError,
 )
 from app.db.session import AsyncSessionLocal, init_db
-from app.services.superadmin_service import ensure_superadmin_exists
 
 # ==========================================================
 # Logging Configuration
@@ -76,12 +75,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Database migration note: %s", e)
 
-    # Ensure superadmin, initial banners, testimonials, and products exist
-    try:
-        async with AsyncSessionLocal() as db:
-            await ensure_superadmin_exists(db)
-    except Exception as e:
-        logger.error("Startup initialization failed: %s", e)
+
 
 
 

@@ -4,29 +4,47 @@ Tests for Admin Banner Management and Password Updates.
 
 import pytest
 from httpx import AsyncClient
-from app.db.seed_data import seed_database
-from app.core.security import create_access_token
+from app.services.superadmin_service import ensure_superadmin_exists
+from app.core.config import settings
 from tests.conftest import TestSessionLocal
 
 pytestmark = pytest.mark.asyncio
 
 
-async def _seed_and_get_superadmin_headers():
+async def _get_superadmin_client(client: AsyncClient) -> AsyncClient:
+    """
+    Ensure the superadmin exists, log in via the API (which sets httponly auth
+    and csrf_token cookies on the client), and attach the X-CSRF-Token header
+    so subsequent state-changing requests pass CSRF validation.
+    """
     async with TestSessionLocal() as session:
-        await seed_database(session)
-    token = create_access_token(data={"sub": "superadmin-001", "role": "superadmin"})
-    return {"Authorization": f"Bearer {token}"}
+        await ensure_superadmin_exists(session)
+        await session.commit()
+
+    login_res = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": settings.SUPERADMIN_EMAIL,
+            "password": settings.SUPERADMIN_PASSWORD,
+        },
+    )
+    assert login_res.status_code == 200, f"Superadmin login failed: {login_res.json()}"
+
+    csrf = login_res.cookies.get("csrf_token")
+    if csrf:
+        client.headers["x-csrf-token"] = csrf
+
+    return client
 
 
 class TestBannerAndPasswordManagement:
 
     async def test_banner_lifecycle(self, client: AsyncClient):
-        headers = await _seed_and_get_superadmin_headers()
+        client = await _get_superadmin_client(client)
 
         # 1. Create a banner
         create_res = await client.post(
             "/api/v1/admin/banners",
-            headers=headers,
             data={
                 "title": "Test Gold Truffles",
                 "subtitle": "Limited luxury edition",
@@ -47,19 +65,15 @@ class TestBannerAndPasswordManagement:
         assert "Test Gold Truffles" in titles
 
         # 3. Delete banner
-        del_res = await client.delete(
-            f"/api/v1/admin/banners/{banner_id}",
-            headers=headers,
-        )
+        del_res = await client.delete(f"/api/v1/admin/banners/{banner_id}")
         assert del_res.status_code == 204
 
     async def test_admin_password_update(self, client: AsyncClient):
-        headers = await _seed_and_get_superadmin_headers()
+        client = await _get_superadmin_client(client)
 
         # 1. Create admin user
         admin_res = await client.post(
             "/api/v1/admin/users",
-            headers=headers,
             json={
                 "full_name": "Test Admin",
                 "email": "testadmin@chovique.com",
@@ -73,7 +87,6 @@ class TestBannerAndPasswordManagement:
         # 2. Update password for admin
         pw_res = await client.patch(
             f"/api/v1/admin/users/{admin_id}/password",
-            headers=headers,
             json={"password": "NewSecretPassword123!"},
         )
         assert pw_res.status_code == 200
