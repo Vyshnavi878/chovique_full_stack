@@ -1,42 +1,15 @@
 import asyncio
 import logging
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from typing import Optional
+import httpx
 from fastapi import HTTPException, status
-from fastapi_mail import ConnectionConfig, FastMail, MessageSchema, MessageType
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-
-
-def get_mail_config(port: int | None = None) -> ConnectionConfig:
-    """
-    Build FastMail ConnectionConfig dynamically.
-    Auto-adjusts SSL/TLS vs STARTTLS based on port if standard defaults are provided,
-    and applies a short timeout so requests never block.
-    """
-    actual_port = port or settings.MAIL_PORT
-    starttls = settings.MAIL_STARTTLS
-    ssl_tls = settings.MAIL_SSL_TLS
-
-    if actual_port == 465:
-        ssl_tls = True
-        starttls = False
-    elif actual_port == 587:
-        starttls = True
-        ssl_tls = False
-
-    return ConnectionConfig(
-        MAIL_USERNAME=settings.MAIL_USERNAME,
-        MAIL_PASSWORD=settings.MAIL_PASSWORD,
-        MAIL_FROM=settings.MAIL_FROM,
-        MAIL_PORT=actual_port,
-        MAIL_SERVER=settings.MAIL_SERVER,
-        MAIL_STARTTLS=starttls,
-        MAIL_SSL_TLS=ssl_tls,
-        USE_CREDENTIALS=True,
-        VALIDATE_CERTS=True,
-        TIMEOUT=getattr(settings, "MAIL_TIMEOUT", 10),
-    )
 
 
 def _otp_expiry_minutes() -> int:
@@ -63,50 +36,109 @@ def _build_otp_html(name: str, otp: str, heading: str, body_text: str, footer_no
     """
 
 
-async def _send_mail_with_fallback(
-    message: MessageSchema,
+def _send_sync_smtp(email: str, subject: str, html_body: str, port: int) -> None:
+    """
+    Send an email synchronously using Python's native smtplib socket implementation.
+    This avoids uvloop/aiosmtplib event-loop bugs on Linux/Render.
+    """
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    from_addr = settings.MAIL_FROM or settings.MAIL_USERNAME
+    msg["From"] = from_addr
+    msg["To"] = email
+    msg.attach(MIMEText(html_body, "html"))
+
+    timeout = getattr(settings, "MAIL_TIMEOUT", 10)
+    server_host = settings.MAIL_SERVER
+
+    if port == 465:
+        with smtplib.SMTP_SSL(server_host, port, timeout=timeout) as server:
+            if settings.MAIL_USERNAME and settings.MAIL_PASSWORD:
+                server.login(settings.MAIL_USERNAME, settings.MAIL_PASSWORD)
+            server.send_message(msg)
+    else:
+        with smtplib.SMTP(server_host, port, timeout=timeout) as server:
+            server.ehlo()
+            if getattr(settings, "MAIL_STARTTLS", True):
+                server.starttls()
+                server.ehlo()
+            if settings.MAIL_USERNAME and settings.MAIL_PASSWORD:
+                server.login(settings.MAIL_USERNAME, settings.MAIL_PASSWORD)
+            server.send_message(msg)
+
+
+async def _send_mail_dispatcher(
     email: str,
+    subject: str,
+    html_body: str,
     context_label: str,
     fallback_otp: str | None = None,
-) -> None:
+) -> bool:
     """
-    Attempt to send email via primary configured port (e.g. 587).
-    If that fails or times out (e.g. Render port 587 restriction),
-    automatically attempts fallback port (e.g. 465 with SSL/TLS).
+    Unified mail dispatcher:
+    1. Attempts Resend HTTP REST API if RESEND_API_KEY is configured (HTTPS port 443).
+    2. Dispatches native smtplib in a background thread to primary SMTP port (e.g. 587 or 465).
+    3. Retries on fallback SMTP port (465 SSL or 587 STARTTLS) if primary fails.
     """
-    timeout_seconds = getattr(settings, "MAIL_TIMEOUT", 10)
-    primary_port = settings.MAIL_PORT
+    # 1. Resend HTTPS REST API (Port 443, never blocked by cloud firewalls)
+    resend_api_key = getattr(settings, "RESEND_API_KEY", None)
+    if resend_api_key and resend_api_key.strip():
+        try:
+            from_email = settings.MAIL_FROM or "Chovique Chocolatier <onboarding@resend.dev>"
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    "https://api.resend.com/emails",
+                    headers={
+                        "Authorization": f"Bearer {resend_api_key.strip()}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "from": from_email,
+                        "to": [email],
+                        "subject": subject,
+                        "html": html_body,
+                    },
+                )
+                if resp.is_success:
+                    logger.info(f"{context_label} delivered successfully to {email} via Resend API")
+                    return True
+                else:
+                    logger.warning(
+                        f"Resend API returned {resp.status_code}: {resp.text}. Falling back to SMTP..."
+                    )
+        except Exception as resend_err:
+            logger.warning(
+                f"Resend API request failed for {email} ({resend_err}). Falling back to SMTP..."
+            )
 
-    # Attempt 1: primary port
-    primary_conf = get_mail_config(primary_port)
-    fm = FastMail(primary_conf)
+    # 2. Native SMTP via background thread (Primary Port)
+    primary_port = settings.MAIL_PORT
     try:
-        await asyncio.wait_for(fm.send_message(message), timeout=timeout_seconds)
-        logger.info(f"{context_label} sent successfully to {email} via {primary_conf.MAIL_SERVER}:{primary_port}")
-        return
+        await asyncio.to_thread(_send_sync_smtp, email, subject, html_body, primary_port)
+        logger.info(f"{context_label} delivered successfully to {email} via {settings.MAIL_SERVER}:{primary_port}")
+        return True
     except Exception as primary_err:
         logger.warning(
-            f"{context_label} attempt on {primary_conf.MAIL_SERVER}:{primary_port} failed ({primary_err}). "
+            f"{context_label} delivery via {settings.MAIL_SERVER}:{primary_port} failed ({primary_err}). "
             f"Attempting fallback port..."
         )
 
-    # Attempt 2: fallback port (465 SSL if 587, or 587 STARTTLS if 465)
+    # 3. Native SMTP via background thread (Fallback Port 465 <-> 587)
     fallback_port = 465 if primary_port == 587 else (587 if primary_port == 465 else None)
     if fallback_port:
         try:
-            fallback_conf = get_mail_config(fallback_port)
-            fm_fallback = FastMail(fallback_conf)
-            await asyncio.wait_for(fm_fallback.send_message(message), timeout=timeout_seconds)
-            logger.info(f"{context_label} sent successfully to {email} via fallback {fallback_conf.MAIL_SERVER}:{fallback_port}")
-            return
+            await asyncio.to_thread(_send_sync_smtp, email, subject, html_body, fallback_port)
+            logger.info(
+                f"{context_label} delivered successfully to {email} via fallback {settings.MAIL_SERVER}:{fallback_port}"
+            )
+            return True
         except Exception as fallback_err:
             logger.error(
-                f"{context_label} fallback on {primary_conf.MAIL_SERVER}:{fallback_port} failed ({fallback_err})."
+                f"{context_label} delivery via fallback {settings.MAIL_SERVER}:{fallback_port} failed ({fallback_err})."
             )
 
-    # If all attempts fail
     logger.error(
-        f"All SMTP delivery attempts failed for {email} via {primary_conf.MAIL_SERVER}:{primary_port}. "
+        f"All email delivery attempts failed for {email}. "
         f"Please verify Render MAIL_SERVER, MAIL_PORT, MAIL_USERNAME, and MAIL_PASSWORD environment variables."
     )
 
@@ -115,12 +147,9 @@ async def _send_mail_with_fallback(
             print(f"\n==========================================")
             print(f"[DEV MODE - MAIL FAILED] {context_label} for {email}: {fallback_otp}")
             print(f"==========================================\n")
-        return
+        return True
 
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="Unable to deliver verification email. Please verify SMTP configuration or try again later.",
-    )
+    return False
 
 
 class MailService:
@@ -141,18 +170,18 @@ class MailService:
             body_text="Your OTP for verifying your email address is:",
             footer_note="If you did not request this OTP, please ignore this email.",
         )
-        message = MessageSchema(
-            subject=subject,
-            recipients=[email],
-            body=html,
-            subtype=MessageType.html,
-        )
-        await _send_mail_with_fallback(
-            message=message,
+        success = await _send_mail_dispatcher(
             email=email,
+            subject=subject,
+            html_body=html,
             context_label="Registration OTP",
             fallback_otp=otp,
         )
+        if not success and not settings.DEBUG:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Unable to deliver verification email. Please verify SMTP configuration or try again later.",
+            )
 
     @staticmethod
     async def send_resend_registration_otp(
@@ -170,18 +199,18 @@ class MailService:
             body_text="Here is your new verification OTP:",
             footer_note="If you did not request this OTP, please ignore this email.",
         )
-        message = MessageSchema(
-            subject=subject,
-            recipients=[email],
-            body=html,
-            subtype=MessageType.html,
-        )
-        await _send_mail_with_fallback(
-            message=message,
+        success = await _send_mail_dispatcher(
             email=email,
+            subject=subject,
+            html_body=html,
             context_label="Resend Registration OTP",
             fallback_otp=otp,
         )
+        if not success and not settings.DEBUG:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Unable to deliver verification email. Please verify SMTP configuration or try again later.",
+            )
 
     @staticmethod
     async def send_forgot_password_otp(
@@ -207,19 +236,19 @@ class MailService:
             body_text=body_text,
             footer_note="If you did not request a password reset, please ignore this email.",
         )
-        message = MessageSchema(
-            subject=subject,
-            recipients=[email],
-            body=html,
-            subtype=MessageType.html,
-        )
         label = "Resend Forgot Password OTP" if is_resend else "Forgot Password OTP"
-        await _send_mail_with_fallback(
-            message=message,
+        success = await _send_mail_dispatcher(
             email=email,
+            subject=subject,
+            html_body=html,
             context_label=label,
             fallback_otp=otp,
         )
+        if not success and not settings.DEBUG:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Unable to deliver password reset email. Please verify SMTP configuration or try again later.",
+            )
 
     @staticmethod
     async def send_update_password_otp(
@@ -239,18 +268,18 @@ class MailService:
             body_text=body_text,
             footer_note="If you did not request a password update, please secure your account.",
         )
-        message = MessageSchema(
-            subject=subject,
-            recipients=[email],
-            body=html,
-            subtype=MessageType.html,
-        )
-        await _send_mail_with_fallback(
-            message=message,
+        success = await _send_mail_dispatcher(
             email=email,
+            subject=subject,
+            html_body=html,
             context_label="Update Password OTP",
             fallback_otp=otp,
         )
+        if not success and not settings.DEBUG:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Unable to deliver verification email. Please verify SMTP configuration or try again later.",
+            )
 
     @staticmethod
     async def send_generic_email(
@@ -258,45 +287,10 @@ class MailService:
         subject: str,
         html_content: str,
     ) -> bool:
-        """Send a transactional/notification email using existing SMTP configuration."""
-        message = MessageSchema(
+        """Send a transactional/notification email using existing infrastructure."""
+        return await _send_mail_dispatcher(
+            email=email,
             subject=subject,
-            recipients=[email],
-            body=html_content,
-            subtype=MessageType.html,
+            html_body=html_content,
+            context_label="Notification Email",
         )
-        timeout_seconds = getattr(settings, "MAIL_TIMEOUT", 10)
-        primary_port = settings.MAIL_PORT
-
-        # 1. Primary port
-        primary_conf = get_mail_config(primary_port)
-        fm = FastMail(primary_conf)
-        try:
-            await asyncio.wait_for(fm.send_message(message), timeout=timeout_seconds)
-            logger.info(f"SMTP notification email sent successfully to {email} | Subject: {subject}")
-            return True
-        except Exception as primary_err:
-            logger.warning(
-                f"SMTP notification failed on {primary_conf.MAIL_SERVER}:{primary_port} ({primary_err}). "
-                f"Attempting fallback port..."
-            )
-
-        # 2. Fallback port
-        fallback_port = 465 if primary_port == 587 else (587 if primary_port == 465 else None)
-        if fallback_port:
-            try:
-                fallback_conf = get_mail_config(fallback_port)
-                fm_fallback = FastMail(fallback_conf)
-                await asyncio.wait_for(fm_fallback.send_message(message), timeout=timeout_seconds)
-                logger.info(f"SMTP notification sent successfully to {email} via fallback port {fallback_port}")
-                return True
-            except Exception as fallback_err:
-                logger.error(
-                    f"SMTP notification fallback failed on {primary_conf.MAIL_SERVER}:{fallback_port} for {email}: {fallback_err}"
-                )
-
-        if settings.DEBUG:
-            print(f"\n==========================================")
-            print(f"[DEV MODE - SMTP FAILED] Email to {email} | Subject: {subject}")
-            print(f"==========================================\n")
-        return False
