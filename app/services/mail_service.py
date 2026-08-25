@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from fastapi_mail import ConnectionConfig, FastMail, MessageSchema, MessageType
 
@@ -5,17 +6,36 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-conf = ConnectionConfig(
-    MAIL_USERNAME=settings.MAIL_USERNAME,
-    MAIL_PASSWORD=settings.MAIL_PASSWORD,
-    MAIL_FROM=settings.MAIL_FROM,
-    MAIL_PORT=settings.MAIL_PORT,
-    MAIL_SERVER=settings.MAIL_SERVER,
-    MAIL_STARTTLS=settings.MAIL_STARTTLS,
-    MAIL_SSL_TLS=settings.MAIL_SSL_TLS,
-    USE_CREDENTIALS=True,
-    VALIDATE_CERTS=True,
-)
+
+def get_mail_config() -> ConnectionConfig:
+    """
+    Build FastMail ConnectionConfig dynamically.
+    Auto-adjusts SSL/TLS vs STARTTLS based on port if standard defaults are provided,
+    and applies a short timeout so requests never block.
+    """
+    port = settings.MAIL_PORT
+    starttls = settings.MAIL_STARTTLS
+    ssl_tls = settings.MAIL_SSL_TLS
+
+    if port == 465:
+        ssl_tls = True
+        starttls = False
+    elif port == 587:
+        starttls = True
+        ssl_tls = False
+
+    return ConnectionConfig(
+        MAIL_USERNAME=settings.MAIL_USERNAME,
+        MAIL_PASSWORD=settings.MAIL_PASSWORD,
+        MAIL_FROM=settings.MAIL_FROM,
+        MAIL_PORT=port,
+        MAIL_SERVER=settings.MAIL_SERVER,
+        MAIL_STARTTLS=starttls,
+        MAIL_SSL_TLS=ssl_tls,
+        USE_CREDENTIALS=True,
+        VALIDATE_CERTS=True,
+        TIMEOUT=getattr(settings, "MAIL_TIMEOUT", 10),
+    )
 
 
 def _otp_expiry_minutes() -> int:
@@ -66,11 +86,25 @@ class MailService:
             body=html,
             subtype=MessageType.html,
         )
+        conf = get_mail_config()
         fm = FastMail(conf)
+        timeout_seconds = getattr(settings, "MAIL_TIMEOUT", 10)
         try:
-            await fm.send_message(message)
+            await asyncio.wait_for(fm.send_message(message), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            logger.error(
+                f"Registration OTP delivery timed out after {timeout_seconds}s for {email} connecting to {conf.MAIL_SERVER}:{conf.MAIL_PORT}."
+            )
+            if settings.DEBUG:
+                print(f"\n==========================================")
+                print(f"[DEV MODE - MAIL TIMEOUT] Registration OTP for {email}: {otp}")
+                print(f"==========================================\n")
+            else:
+                raise RuntimeError(
+                    f"Email service timed out connecting to {conf.MAIL_SERVER}:{conf.MAIL_PORT}. Please try again later."
+                )
         except Exception as e:
-            logger.error(f"Failed to send registration OTP email to {email}: {e}")
+            logger.error(f"Failed to send registration OTP email to {email} via {conf.MAIL_SERVER}:{conf.MAIL_PORT}: {e}")
             if settings.DEBUG:
                 print(f"\n==========================================")
                 print(f"[DEV MODE - MAIL FAILED] Registration OTP for {email}: {otp}")
@@ -100,11 +134,25 @@ class MailService:
             body=html,
             subtype=MessageType.html,
         )
+        conf = get_mail_config()
         fm = FastMail(conf)
+        timeout_seconds = getattr(settings, "MAIL_TIMEOUT", 10)
         try:
-            await fm.send_message(message)
+            await asyncio.wait_for(fm.send_message(message), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            logger.error(
+                f"Resend Registration OTP delivery timed out after {timeout_seconds}s for {email} connecting to {conf.MAIL_SERVER}:{conf.MAIL_PORT}."
+            )
+            if settings.DEBUG:
+                print(f"\n==========================================")
+                print(f"[DEV MODE - MAIL TIMEOUT] Resend Registration OTP for {email}: {otp}")
+                print(f"==========================================\n")
+            else:
+                raise RuntimeError(
+                    f"Email service timed out connecting to {conf.MAIL_SERVER}:{conf.MAIL_PORT}. Please try again later."
+                )
         except Exception as e:
-            logger.error(f"Failed to send resend registration OTP email to {email}: {e}")
+            logger.error(f"Failed to send resend registration OTP email to {email} via {conf.MAIL_SERVER}:{conf.MAIL_PORT}: {e}")
             if settings.DEBUG:
                 print(f"\n==========================================")
                 print(f"[DEV MODE - MAIL FAILED] Resend Registration OTP for {email}: {otp}")
@@ -142,12 +190,27 @@ class MailService:
             body=html,
             subtype=MessageType.html,
         )
+        conf = get_mail_config()
         fm = FastMail(conf)
+        timeout_seconds = getattr(settings, "MAIL_TIMEOUT", 10)
         try:
-            await fm.send_message(message)
+            await asyncio.wait_for(fm.send_message(message), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            label = "Resend Forgot" if is_resend else "Forgot"
+            logger.error(
+                f"{label} Password OTP delivery timed out after {timeout_seconds}s for {email} connecting to {conf.MAIL_SERVER}:{conf.MAIL_PORT}."
+            )
+            if settings.DEBUG:
+                print(f"\n==========================================")
+                print(f"[DEV MODE - MAIL TIMEOUT] {label} Password OTP for {email}: {otp}")
+                print(f"==========================================\n")
+            else:
+                raise RuntimeError(
+                    f"Email service timed out connecting to {conf.MAIL_SERVER}:{conf.MAIL_PORT}. Please try again later."
+                )
         except Exception as e:
             label = "Resend Forgot" if is_resend else "Forgot"
-            logger.error(f"Failed to send {label} Password OTP email to {email}: {e}")
+            logger.error(f"Failed to send {label} Password OTP email to {email} via {conf.MAIL_SERVER}:{conf.MAIL_PORT}: {e}")
             if settings.DEBUG:
                 print(f"\n==========================================")
                 print(f"[DEV MODE - MAIL FAILED] {label} Password OTP for {email}: {otp}")
@@ -179,11 +242,25 @@ class MailService:
             body=html,
             subtype=MessageType.html,
         )
+        conf = get_mail_config()
         fm = FastMail(conf)
+        timeout_seconds = getattr(settings, "MAIL_TIMEOUT", 10)
         try:
-            await fm.send_message(message)
+            await asyncio.wait_for(fm.send_message(message), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            logger.error(
+                f"Update Password OTP delivery timed out after {timeout_seconds}s for {email} connecting to {conf.MAIL_SERVER}:{conf.MAIL_PORT}."
+            )
+            if settings.DEBUG:
+                print(f"\n==========================================")
+                print(f"[DEV MODE - MAIL TIMEOUT] Update Password OTP for {email}: {otp}")
+                print(f"==========================================\n")
+            else:
+                raise RuntimeError(
+                    f"Email service timed out connecting to {conf.MAIL_SERVER}:{conf.MAIL_PORT}. Please try again later."
+                )
         except Exception as e:
-            logger.error(f"Failed to send Update Password OTP email to {email}: {e}")
+            logger.error(f"Failed to send Update Password OTP email to {email} via {conf.MAIL_SERVER}:{conf.MAIL_PORT}: {e}")
             if settings.DEBUG:
                 print(f"\n==========================================")
                 print(f"[DEV MODE - MAIL FAILED] Update Password OTP for {email}: {otp}")
@@ -204,13 +281,25 @@ class MailService:
             body=html_content,
             subtype=MessageType.html,
         )
+        conf = get_mail_config()
         fm = FastMail(conf)
+        timeout_seconds = getattr(settings, "MAIL_TIMEOUT", 10)
         try:
-            await fm.send_message(message)
+            await asyncio.wait_for(fm.send_message(message), timeout=timeout_seconds)
             logger.info(f"SMTP notification email sent successfully to {email} | Subject: {subject}")
             return True
+        except asyncio.TimeoutError:
+            logger.error(
+                f"SMTP notification email delivery timed out after {timeout_seconds}s for {email} "
+                f"connecting to {conf.MAIL_SERVER}:{conf.MAIL_PORT}. "
+                f"Please verify SMTP host/port configuration (e.g. port 465 with SSL vs port 587 with STARTTLS) "
+                f"and ensure outbound SMTP traffic is permitted."
+            )
+            return False
         except Exception as e:
-            logger.error(f"SMTP notification email delivery failed for {email}: {e}")
+            logger.error(
+                f"SMTP notification email delivery failed for {email} via {conf.MAIL_SERVER}:{conf.MAIL_PORT}: {e}"
+            )
             if settings.DEBUG:
                 print(f"\n==========================================")
                 print(f"[DEV MODE - SMTP FAILED] Email to {email} | Subject: {subject}")

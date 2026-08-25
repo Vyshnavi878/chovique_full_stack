@@ -93,15 +93,18 @@ class SuperadminAdminsService:
         )
 
         try:
+            import asyncio
             from app.integrations.resend import resend_email
-            await resend_email.send_superadmin_new_admin(
-                super_admin_email=current_superadmin.email,
-                super_admin_name=current_superadmin.full_name,
-                admin_name=new_admin.full_name,
-                admin_email=new_admin.email,
-                created_at=new_admin.created_at.strftime("%d %b %Y, %I:%M %p") if new_admin.created_at else "",
+            asyncio.create_task(
+                resend_email.send_superadmin_new_admin(
+                    super_admin_email=current_superadmin.email,
+                    super_admin_name=current_superadmin.full_name,
+                    admin_name=new_admin.full_name,
+                    admin_email=new_admin.email,
+                    created_at=new_admin.created_at.strftime("%d %b %Y, %I:%M %p") if new_admin.created_at else "",
+                )
             )
-        except Exception as email_err:
+        except Exception:
             pass
 
         return self._to_response(new_admin)
@@ -238,13 +241,16 @@ class SuperadminAdminsService:
 
         try:
             from datetime import datetime
+            import asyncio
             from app.integrations.resend import resend_email
-            await resend_email.send_superadmin_admin_updated(
-                super_admin_email=current_superadmin.email,
-                super_admin_name=current_superadmin.full_name,
-                admin_name=user.full_name,
-                admin_email=user.email,
-                updated_at=datetime.now().strftime("%d %b %Y, %I:%M %p"),
+            asyncio.create_task(
+                resend_email.send_superadmin_admin_updated(
+                    super_admin_email=current_superadmin.email,
+                    super_admin_name=current_superadmin.full_name,
+                    admin_name=user.full_name,
+                    admin_email=user.email,
+                    updated_at=datetime.now().strftime("%d %b %Y, %I:%M %p"),
+                )
             )
         except Exception:
             pass
@@ -300,23 +306,28 @@ class SuperadminAdminsService:
 
         try:
             from datetime import datetime
+            import asyncio
             from app.integrations.resend import resend_email
             dt_str = datetime.now().strftime("%d %b %Y, %I:%M %p")
             if new_is_active:
-                await resend_email.send_superadmin_admin_activated(
-                    super_admin_email=current_superadmin.email,
-                    super_admin_name=current_superadmin.full_name,
-                    admin_name=user.full_name,
-                    admin_email=user.email,
-                    activated_at=dt_str,
+                asyncio.create_task(
+                    resend_email.send_superadmin_admin_activated(
+                        super_admin_email=current_superadmin.email,
+                        super_admin_name=current_superadmin.full_name,
+                        admin_name=user.full_name,
+                        admin_email=user.email,
+                        activated_at=dt_str,
+                    )
                 )
             else:
-                await resend_email.send_superadmin_admin_deactivated(
-                    super_admin_email=current_superadmin.email,
-                    super_admin_name=current_superadmin.full_name,
-                    admin_name=user.full_name,
-                    admin_email=user.email,
-                    deactivated_at=dt_str,
+                asyncio.create_task(
+                    resend_email.send_superadmin_admin_deactivated(
+                        super_admin_email=current_superadmin.email,
+                        super_admin_name=current_superadmin.full_name,
+                        admin_name=user.full_name,
+                        admin_email=user.email,
+                        deactivated_at=dt_str,
+                    )
                 )
         except Exception:
             pass
@@ -360,13 +371,16 @@ class SuperadminAdminsService:
 
         try:
             from datetime import datetime
+            import asyncio
             from app.integrations.resend import resend_email
-            await resend_email.send_superadmin_admin_password_updated(
-                super_admin_email=current_superadmin.email,
-                super_admin_name=current_superadmin.full_name,
-                admin_name=user.full_name,
-                admin_email=user.email,
-                updated_at=datetime.now().strftime("%d %b %Y, %I:%M %p"),
+            asyncio.create_task(
+                resend_email.send_superadmin_admin_password_updated(
+                    super_admin_email=current_superadmin.email,
+                    super_admin_name=current_superadmin.full_name,
+                    admin_name=user.full_name,
+                    admin_email=user.email,
+                    updated_at=datetime.now().strftime("%d %b %Y, %I:%M %p"),
+                )
             )
         except Exception:
             pass

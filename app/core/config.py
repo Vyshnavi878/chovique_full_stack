@@ -90,6 +90,17 @@ class Settings(BaseSettings):
 
     MAIL_STARTTLS: bool = True
     MAIL_SSL_TLS: bool = False
+    MAIL_TIMEOUT: int = 10
+
+    @field_validator("MAIL_TIMEOUT", mode="before")
+    @classmethod
+    def parse_mail_timeout(cls, v):
+        if v is None or v == "":
+            return 10
+        try:
+            return int(v)
+        except (ValueError, TypeError):
+            return 10
 
     OTP_EXPIRE_SECONDS: int = 300
     MAX_OTP_ATTEMPTS: int = 3
