@@ -1,5 +1,4 @@
-"""Dependency helpers for API routes."""
-
+import logging
 from typing import Optional
 
 from fastapi import Cookie, Header, HTTPException, status
@@ -10,6 +9,9 @@ from app.core.security import decode_token
 from app.db.session import get_db
 from app.models.user import User
 from app.repositories.user_repository import UserRepository
+from app.db.redis import redis_client
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_token(
@@ -55,18 +57,15 @@ async def get_current_user_id(
             detail="Invalid or expired access token.",
         )
 
-    from app.db.redis import redis_client
-    import logging
-    import redis.exceptions
-
-    is_blocked = False
     try:
         is_blocked = await redis_client.get(f"blocklist:{token}")
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"Redis connection error: {e}. Skipping token blocklist check. Is Redis running?")
-        is_blocked = False
-        
+        logger.error("Token revocation verification failed due to Redis service disruption: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service is temporarily unavailable. Please try again.",
+        )
+
     if is_blocked:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

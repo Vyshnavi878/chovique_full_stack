@@ -258,7 +258,7 @@ async def login(
 # GOOGLE LOGIN
 # ======================================================
 
-@router.post("/google", summary="Google OAuth login / registration", response_model=AuthUserResponse)
+@router.post("/google", summary="Google OAuth login / registration", response_model=AuthUserResponse, dependencies=[Depends(RateLimiter(times=10, seconds=60))])
 async def google_login(
     request: GoogleLoginRequest,
     response: Response,
@@ -293,7 +293,7 @@ async def google_login(
 # SET PASSWORD
 # ======================================================
 
-@router.post("/set-password", response_model=AuthUserResponse)
+@router.post("/set-password", response_model=AuthUserResponse, dependencies=[Depends(RateLimiter(times=5, seconds=60))])
 async def set_password(
     request: SetPasswordRequest,
     response: Response,
@@ -401,7 +401,7 @@ async def reset_password(
 # CHANGE PASSWORD
 # ======================================================
 
-@router.post("/change-password", response_model=MessageResponse)
+@router.post("/change-password", response_model=MessageResponse, dependencies=[Depends(RateLimiter(times=5, seconds=60))])
 async def change_password(
     request: ChangePasswordRequest,
     user_id: str = Depends(get_current_user_id),
@@ -427,7 +427,7 @@ async def change_password(
 # REFRESH TOKEN
 # ======================================================
 
-@router.post("/refresh", response_model=MessageResponse)
+@router.post("/refresh", response_model=MessageResponse, dependencies=[Depends(RateLimiter(times=20, seconds=60))])
 async def refresh_token(
     response: Response,
     refresh_token: str | None = Cookie(
@@ -465,7 +465,7 @@ async def refresh_token(
 # LOGOUT
 # ======================================================
 
-@router.post("/logout", response_model=MessageResponse)
+@router.post("/logout", response_model=MessageResponse, dependencies=[Depends(RateLimiter(times=10, seconds=60))])
 async def logout(
     response: Response,
     refresh_token: str | None = Cookie(

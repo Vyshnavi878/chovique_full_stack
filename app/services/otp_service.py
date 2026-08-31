@@ -141,8 +141,8 @@ class OTPService:
 
             raise OTPExpiredError(remaining_attempts=remaining)
 
-        # Step 4: OTP doesn't match
-        if stored_otp != otp:
+        # Step 4: OTP doesn't match (constant-time comparison)
+        if not secrets.compare_digest(str(stored_otp), str(otp)):
             # Increment attempts atomically
             new_attempts = await OTPService.increment_attempts(email, purpose)
             remaining = max(0, max_attempts - new_attempts)

@@ -154,10 +154,12 @@ import os
 from app.middleware.csrf_middleware import CSRFMiddleware
 from app.middleware.audit import AuditLogMiddleware
 from app.middleware.logging_middleware import LoggingMiddleware
+from app.middleware.security_headers import SecurityHeadersMiddleware
 
 # NOTE: Middleware runs in REVERSE order of registration.
 # CORS must be added LAST so it executes FIRST (outermost layer),
 # ensuring preflight OPTIONS and all error responses include CORS headers.
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(CSRFMiddleware)
 app.add_middleware(AuditLogMiddleware)
 app.add_middleware(LoggingMiddleware)
@@ -166,7 +168,6 @@ if settings.ALLOWED_ORIGINS:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.ALLOWED_ORIGINS,
-        allow_origin_regex=r"^https://.*\.vercel\.app$|^http://(localhost|127\.0\.0\.1)(:[0-9]+)?$",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

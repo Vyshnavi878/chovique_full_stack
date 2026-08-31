@@ -343,28 +343,14 @@ class AuthService:
                 request.email
             )
 
-            if not user:
-                raise ValueError(
-                    "Invalid email or password."
+            is_valid_password = False
+            if user and user.hashed_password:
+                is_valid_password = verify_password(
+                    request.password,
+                    user.hashed_password,
                 )
 
-            # Check active account
-            if not user.is_active:
-                raise ValueError(
-                    "Your account is deactivated by the administration due to some issues. Leave a request to support.chovique.com to activate your account."
-                )
-
-            # Google users don't have password
-            if not user.hashed_password:
-                raise ValueError(
-                    "Please login using Google."
-                )
-
-            # Verify password
-            if not verify_password(
-                request.password,
-                user.hashed_password,
-            ):
+            if not user or not is_valid_password:
                 try:
                     from app.db.redis import redis_client
                     attempts = await redis_client.incr(attempts_key)
@@ -395,6 +381,12 @@ class AuthService:
 
                 raise ValueError(
                     "Invalid email or password."
+                )
+
+            # Check active account after verifying credentials
+            if not user.is_active:
+                raise ValueError(
+                    "Your account is deactivated by the administration due to some issues. Leave a request to support.chovique.com to activate your account."
                 )
 
         # Success: clear lockout counters
@@ -699,7 +691,11 @@ class AuthService:
         existing_user = await self.user_repo.get_by_email(email)
 
         if existing_user and existing_user.is_email_verified:
-            raise ValueError("Email already registered.")
+            return {
+                "message": "OTP resent successfully.",
+                "email": email,
+                "expires_in": settings.OTP_EXPIRE_SECONDS,
+            }
 
         await self.otp_service.check_resend_limit(email, purpose="register")
 

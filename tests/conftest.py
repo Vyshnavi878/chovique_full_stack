@@ -99,7 +99,9 @@ def mock_redis():
 
     with patch("app.services.otp_service.redis_client", fake_redis):
         with patch("app.db.redis.redis_client", fake_redis):
-            yield fake_redis
+            with patch("app.api.deps.redis_client", fake_redis):
+                with patch("app.middleware.rate_limit_middleware.redis_client", fake_redis):
+                    yield fake_redis
 
 
 # ==========================================================
