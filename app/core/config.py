@@ -22,8 +22,8 @@ class Settings(BaseSettings):
     # =====================================================
     # Application
     # =====================================================
-    APP_NAME: str
-    APP_VERSION: str
+    APP_NAME: str = "Chovique"
+    APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
 
     # =====================================================
@@ -42,15 +42,28 @@ class Settings(BaseSettings):
     def assemble_db_url(cls, v: str) -> str:
         if isinstance(v, str):
             if v.startswith("postgres://"):
-                return v.replace("postgres://", "postgresql+asyncpg://", 1)
-            elif v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
-                return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+                return v.replace(
+                    "postgres://",
+                    "postgresql+asyncpg://",
+                    1,
+                )
+
+            if (
+                v.startswith("postgresql://")
+                and not v.startswith("postgresql+asyncpg://")
+            ):
+                return v.replace(
+                    "postgresql://",
+                    "postgresql+asyncpg://",
+                    1,
+                )
+
         return v
 
     # =====================================================
     # Redis
     # =====================================================
-    REDIS_URL: str
+    REDIS_URL: str = ""
 
     # =====================================================
     # JWT
@@ -64,29 +77,67 @@ class Settings(BaseSettings):
     # =====================================================
     # CORS
     # =====================================================
-    ALLOWED_ORIGINS: List[str] | str
+    ALLOWED_ORIGINS: List[str]
 
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
     def parse_origins(cls, value):
+        """
+        Convert Render environment variable into a list.
+
+        Example:
+        http://localhost:5173,http://localhost:3000,https://example.vercel.app
+
+        becomes:
+
+        [
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "https://example.vercel.app"
+        ]
+        """
+
         if isinstance(value, str):
+
+            value = value.strip()
+
+            # Support JSON array:
+            # ["https://example.vercel.app", "http://localhost:5173"]
             if value.startswith("[") and value.endswith("]"):
                 import json
+
                 origins = json.loads(value)
-                return [orig.strip().rstrip("/") for orig in origins if orig.strip()]
-            return [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
+
+                return [
+                    origin.strip().rstrip("/")
+                    for origin in origins
+                    if isinstance(origin, str) and origin.strip()
+                ]
+
+            # Support comma-separated values
+            return [
+                origin.strip().rstrip("/")
+                for origin in value.split(",")
+                if origin.strip()
+            ]
+
         if isinstance(value, list):
-            return [orig.strip().rstrip("/") for orig in value if isinstance(orig, str) and orig.strip()]
+            return [
+                origin.strip().rstrip("/")
+                for origin in value
+                if isinstance(origin, str) and origin.strip()
+            ]
+
         return value
 
     # =====================================================
     # SMTP
     # =====================================================
-    MAIL_SERVER: str
-    MAIL_PORT: int
-    MAIL_USERNAME: str
-    MAIL_PASSWORD: str
-    MAIL_FROM: str
+    MAIL_SERVER: str = ""
+    MAIL_PORT: int = 587
+    MAIL_USERNAME: str = ""
+    MAIL_PASSWORD: str = ""
+    MAIL_FROM: str = ""
 
     MAIL_STARTTLS: bool = True
     MAIL_SSL_TLS: bool = False
@@ -97,11 +148,15 @@ class Settings(BaseSettings):
     def parse_mail_timeout(cls, v):
         if v is None or v == "":
             return 10
+
         try:
             return int(v)
         except (ValueError, TypeError):
             return 10
 
+    # =====================================================
+    # OTP
+    # =====================================================
     OTP_EXPIRE_SECONDS: int = 300
     MAX_OTP_ATTEMPTS: int = 3
     MAX_OTP_RESEND_ATTEMPTS: int = 3
@@ -112,6 +167,7 @@ class Settings(BaseSettings):
     def parse_otp_expire_seconds(cls, v):
         if v is None or v == "":
             return 300
+
         try:
             val = int(v)
             return max(val, 300)
@@ -132,7 +188,7 @@ class Settings(BaseSettings):
     RAZORPAY_WEBHOOK_SECRET: str = "webhook_secret_placeholder"
 
     # =====================================================
-    # Resend Email
+    # Resend
     # =====================================================
     RESEND_API_KEY: str = ""
 
@@ -144,11 +200,21 @@ class Settings(BaseSettings):
     CLOUDINARY_API_SECRET: str = ""
 
     # =====================================================
-    # Superadmin Credentials
+    # Superadmin
     # =====================================================
-    SUPERADMIN_EMAIL: str = Field(validation_alias=AliasChoices("SUPERADMIN_EMAIL", "SUPER_ADMIN_EMAIL"))
-    SUPERADMIN_PASSWORD: str = Field(validation_alias=AliasChoices("SUPERADMIN_PASSWORD", "SUPER_ADMIN_PASSWORD"))
+    SUPERADMIN_EMAIL: str = Field(
+        validation_alias=AliasChoices(
+            "SUPERADMIN_EMAIL",
+            "SUPER_ADMIN_EMAIL",
+        )
+    )
 
+    SUPERADMIN_PASSWORD: str = Field(
+        validation_alias=AliasChoices(
+            "SUPERADMIN_PASSWORD",
+            "SUPER_ADMIN_PASSWORD",
+        )
+    )
 
 
 @lru_cache
