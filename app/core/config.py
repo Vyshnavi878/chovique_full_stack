@@ -7,10 +7,10 @@ Works with local development, Render, and Vercel deployments.
 
 import json
 from functools import lru_cache
-from typing import List
+from typing import Annotated, List
 
 from pydantic import AliasChoices, Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     # =========================================================
     # APPLICATION
     # =========================================================
+
     APP_NAME: str = "Chovique"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
@@ -31,30 +32,19 @@ class Settings(BaseSettings):
     # =========================================================
     # API
     # =========================================================
+
     API_V1_PREFIX: str = "/api/v1"
 
     # =========================================================
     # DATABASE
     # =========================================================
+
     DATABASE_URL: str
     DB_ECHO: bool = False
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def assemble_db_url(cls, value):
-        """
-        Convert Render/PostgreSQL URLs to the async SQLAlchemy format.
-
-        Examples:
-
-        postgres://...
-            ->
-        postgresql+asyncpg://...
-
-        postgresql://...
-            ->
-        postgresql+asyncpg://...
-        """
 
         if not isinstance(value, str):
             return value
@@ -83,11 +73,13 @@ class Settings(BaseSettings):
     # =========================================================
     # REDIS
     # =========================================================
+
     REDIS_URL: str = ""
 
     # =========================================================
     # JWT / AUTHENTICATION
     # =========================================================
+
     SECRET_KEY: str
 
     ALGORITHM: str = "HS256"
@@ -98,32 +90,49 @@ class Settings(BaseSettings):
     # =========================================================
     # CORS
     # =========================================================
-    ALLOWED_ORIGINS: List[str]
+
+    # NoDecode is important here.
+    #
+    # Without NoDecode, Pydantic Settings tries to JSON-decode
+    # ALLOWED_ORIGINS before our validator runs.
+    #
+    # This allows both:
+    #
+    # https://example.com,http://localhost:5173
+    #
+    # and:
+    #
+    # ["https://example.com","http://localhost:5173"]
+
+    ALLOWED_ORIGINS: Annotated[List[str], NoDecode]
 
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
     def parse_origins(cls, value):
-        """
-        Supports both:
-
-        Comma-separated:
-        https://chovique-full-stack-frontend.vercel.app,http://localhost:5173
-
-        JSON:
-        ["https://chovique-full-stack-frontend.vercel.app",
-         "http://localhost:5173"]
-        """
 
         if value is None:
             return []
 
+        # Already a list
+        if isinstance(value, list):
+            return [
+                origin.strip().rstrip("/")
+                for origin in value
+                if isinstance(origin, str) and origin.strip()
+            ]
+
+        # String from Render / .env
         if isinstance(value, str):
+
             value = value.strip()
 
             if not value:
                 return []
 
-            # JSON array format
+            # -------------------------------------------------
+            # JSON array
+            # -------------------------------------------------
+
             if value.startswith("[") and value.endswith("]"):
                 try:
                     origins = json.loads(value)
@@ -132,24 +141,21 @@ class Settings(BaseSettings):
                         return [
                             origin.strip().rstrip("/")
                             for origin in origins
-                            if isinstance(origin, str) and origin.strip()
+                            if isinstance(origin, str)
+                            and origin.strip()
                         ]
 
                 except json.JSONDecodeError:
                     pass
 
-            # Comma-separated format
+            # -------------------------------------------------
+            # Comma-separated values
+            # -------------------------------------------------
+
             return [
                 origin.strip().rstrip("/")
                 for origin in value.split(",")
                 if origin.strip()
-            ]
-
-        if isinstance(value, list):
-            return [
-                origin.strip().rstrip("/")
-                for origin in value
-                if isinstance(origin, str) and origin.strip()
             ]
 
         return []
@@ -157,6 +163,7 @@ class Settings(BaseSettings):
     # =========================================================
     # SMTP / EMAIL
     # =========================================================
+
     MAIL_SERVER: str = ""
     MAIL_PORT: int = 587
 
@@ -171,17 +178,20 @@ class Settings(BaseSettings):
     @field_validator("MAIL_TIMEOUT", mode="before")
     @classmethod
     def parse_mail_timeout(cls, value):
+
         if value is None or value == "":
             return 10
 
         try:
             return int(value)
+
         except (ValueError, TypeError):
             return 10
 
     # =========================================================
     # OTP
     # =========================================================
+
     OTP_EXPIRE_SECONDS: int = 300
     MAX_OTP_ATTEMPTS: int = 3
     MAX_OTP_RESEND_ATTEMPTS: int = 3
@@ -190,23 +200,27 @@ class Settings(BaseSettings):
     @field_validator("OTP_EXPIRE_SECONDS", mode="before")
     @classmethod
     def parse_otp_expire_seconds(cls, value):
+
         if value is None or value == "":
             return 300
 
         try:
             return max(int(value), 300)
+
         except (ValueError, TypeError):
             return 300
 
     # =========================================================
     # GOOGLE OAUTH
     # =========================================================
+
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
 
     # =========================================================
     # RAZORPAY
     # =========================================================
+
     RAZORPAY_KEY_ID: str = ""
     RAZORPAY_KEY_SECRET: str = ""
     RAZORPAY_WEBHOOK_SECRET: str = ""
@@ -214,11 +228,13 @@ class Settings(BaseSettings):
     # =========================================================
     # RESEND
     # =========================================================
+
     RESEND_API_KEY: str = ""
 
     # =========================================================
     # CLOUDINARY
     # =========================================================
+
     CLOUDINARY_CLOUD_NAME: str = ""
     CLOUDINARY_API_KEY: str = ""
     CLOUDINARY_API_SECRET: str = ""
@@ -226,6 +242,7 @@ class Settings(BaseSettings):
     # =========================================================
     # SUPERADMIN
     # =========================================================
+
     SUPERADMIN_EMAIL: str = Field(
         validation_alias=AliasChoices(
             "SUPERADMIN_EMAIL",
