@@ -246,3 +246,7 @@ async def app_error_handler(request: Request, exc: AppError):
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+@app.get("/", include_in_schema=False)
+def read_root():
+    return {"message": "Welcome to Chovique API. Please use /api/v1 endpoints."}
