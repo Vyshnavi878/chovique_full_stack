@@ -901,6 +901,10 @@ class AdminService:
 
         try:
             order.payment_status = new_ps
+            if new_ps.upper() == "PAID":
+                order.paid_at = func.now()
+            elif new_ps.upper() in ("PENDING", "FAILED", "CANCELLED"):
+                order.paid_at = None
             await self.db.flush()
             await self.db.commit()
         except Exception:
@@ -1169,6 +1173,52 @@ class AdminService:
         non_cancelled = [o for o in orders if getattr(o, 'status', '') != 'Cancelled']
         spent = sum(o.total for o in non_cancelled)
 
+        from app.repositories.address_repository import AddressRepository
+        addr_repo = AddressRepository(self.db)
+        user_addrs = await addr_repo.get_user_addresses(user.id)
+        default_addr = next((a for a in user_addrs if getattr(a, 'is_default', False)), user_addrs[0] if user_addrs else None)
+
+        formatted_addrs = [
+            {
+                "id": str(a.id),
+                "name": getattr(a, "name", "") or user.full_name,
+                "phone": getattr(a, "phone", "") or user.phone or "",
+                "street": getattr(a, "street", "") or "",
+                "city": getattr(a, "city", "") or "",
+                "state": getattr(a, "state", "") or "",
+                "zip": getattr(a, "zip", "") or getattr(a, "zip_code", "") or "",
+                "is_default": bool(getattr(a, "is_default", False)),
+            }
+            for a in user_addrs
+        ]
+
+        default_addr_dict = None
+        if default_addr:
+            default_addr_dict = {
+                "id": str(default_addr.id),
+                "name": getattr(default_addr, "name", "") or user.full_name,
+                "phone": getattr(default_addr, "phone", "") or user.phone or "",
+                "street": getattr(default_addr, "street", "") or "",
+                "city": getattr(default_addr, "city", "") or "",
+                "state": getattr(default_addr, "state", "") or "",
+                "zip": getattr(default_addr, "zip", "") or getattr(default_addr, "zip_code", "") or "",
+                "is_default": bool(getattr(default_addr, "is_default", False)),
+            }
+        elif orders:
+            for o in orders:
+                ship_raw = getattr(o, "shipping_address", None)
+                if isinstance(ship_raw, dict) and any(ship_raw.values()):
+                    default_addr_dict = {
+                        "name": ship_raw.get("name") or user.full_name,
+                        "phone": ship_raw.get("phone") or user.phone or "",
+                        "street": ship_raw.get("street") or ship_raw.get("address") or "",
+                        "city": ship_raw.get("city") or "",
+                        "state": ship_raw.get("state") or "",
+                        "zip": ship_raw.get("zip") or ship_raw.get("zip_code") or ship_raw.get("pincode") or "",
+                        "is_default": True,
+                    }
+                    break
+
         return CustomerDetailsResponse(
             user=UserResponse.from_orm_user(user),
             total_spent=spent,
@@ -1177,6 +1227,8 @@ class AdminService:
             joined_date=user.created_at.strftime("%b %Y") if user.created_at else "",
             recent_orders=[cs._format_order_response(o) for o in orders],
             support_tickets=[cs._format_ticket_response(t) for t in tickets],
+            default_address=default_addr_dict,
+            addresses=formatted_addrs,
         )
 
     async def update_customer(self, user_id: str, payload: CustomerUpdatePayload, admin_id: str):
@@ -1929,6 +1981,45 @@ class AdminService:
             return False
         await self.reel_repo.delete(reel_id)
         return True
+
+    async def update_reel(
+        self,
+        reel_id: str,
+        title: Optional[str] = None,
+        likes: Optional[str] = None,
+        comments: Optional[str] = None,
+        views: Optional[str] = None,
+        video_url: Optional[str] = None,
+        video_file=None,
+    ) -> ReelResponse:
+        # If a new video file is uploaded, push to Cloudinary
+        if video_file and hasattr(video_file, "filename") and video_file.filename:
+            from app.integrations.cloudinary import cloudinary_service
+            video_url = await cloudinary_service.upload_video(
+                file=video_file,
+                folder="chocolate-world/reels",
+            )
+
+        updated = await self.reel_repo.update(
+            reel_id,
+            **{k: v for k, v in {
+                "title": title,
+                "likes": likes,
+                "comments": comments,
+                "views": views,
+                "video_url": video_url,
+            }.items() if v is not None},
+        )
+        if not updated:
+            raise ValueError("Reel not found")
+        return ReelResponse(
+            id=updated.id,
+            videoUrl=updated.video_url,
+            likes=updated.likes,
+            comments=updated.comments,
+            views=updated.views,
+            title=updated.title,
+        )
 
     async def delete_testimonial(self, testimonial_id: str) -> bool:
         item = await self.testimonial_repo.get_by_id(testimonial_id)

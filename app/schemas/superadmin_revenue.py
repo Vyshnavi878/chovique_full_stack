@@ -11,58 +11,80 @@ class KPICardWithComparison(BaseModel):
 
 
 class RevenueTrendDataPoint(BaseModel):
-    """Single data point in time series revenue trend."""
+    """Single data point in time series revenue & orders trend."""
     date: str = Field(..., description="Formatted date label, e.g. 1 Aug or 2026-08-01")
-    online_revenue: float = Field(0.0, description="Online sales revenue for this interval")
-    offline_revenue: float = Field(0.0, description="Offline sales revenue for this interval")
-    total_revenue: float = Field(0.0, description="Total combined revenue for this interval")
-
-
-class RevenueBySource(BaseModel):
-    """Breakdown of revenue by sales channel (Online vs Offline)."""
-    online_revenue: float = Field(0.0, description="Total online revenue")
-    online_percentage: float = Field(0.0, description="Online revenue percentage")
-    offline_revenue: float = Field(0.0, description="Total offline revenue")
-    offline_percentage: float = Field(0.0, description="Offline revenue percentage")
+    total_revenue: float = Field(0.0, description="Total revenue collected for this interval")
+    online_revenue: float = Field(0.0, description="Online sales revenue collected for this interval")
+    cod_collected: float = Field(0.0, description="COD payments collected for this interval")
+    pending_payment: float = Field(0.0, description="Pending payment amount for this interval")
+    total_orders: int = Field(0, description="Total placed orders in this interval")
+    paid_orders: int = Field(0, description="Paid orders count in this interval")
+    cod_orders: int = Field(0, description="COD orders count in this interval")
+    pending_orders: int = Field(0, description="Pending orders count in this interval")
 
 
 class PaymentMethodRevenue(BaseModel):
     """Revenue breakdown by payment method."""
     method: str = Field(..., description="Payment method name, e.g. UPI, Card, Cash on Delivery")
     amount: float = Field(0.0, description="Total amount collected via this method")
-    percentage: float = Field(0.0, description="Percentage of overall revenue")
+    percentage: float = Field(0.0, description="Percentage of overall collected revenue")
+    orders_count: int = Field(0, description="Number of orders via this payment method")
+
+
+class TransactionOrderRow(BaseModel):
+    """Single transaction row for the detailed orders table."""
+    order_id: str = Field(..., description="Order ID")
+    customer_name: str = Field(..., description="Customer full name")
+    customer_email: str = Field("", description="Customer email")
+    customer_phone: str = Field("", description="Customer phone number")
+    order_date: str = Field(..., description="Order placement timestamp (created_at)")
+    payment_date: Optional[str] = Field(None, description="Actual payment received timestamp (paid_at)")
+    amount: float = Field(0.0, description="Order total amount")
+    payment_method: str = Field("UPI", description="Payment method used")
+    payment_status: str = Field("PENDING", description="Payment status (PAID, PENDING, etc.)")
+    order_status: str = Field("Processing", description="Order fulfillment status")
 
 
 class RevenueSummaryRow(BaseModel):
     """Summary table row for a specific date/interval."""
     date: str = Field(..., description="Date formatted as YYYY-MM-DD or readable string")
-    online_orders: int = Field(0, description="Number of online orders completed")
-    online_revenue: float = Field(0.0, description="Online revenue collected")
-    offline_sales: int = Field(0, description="Number of offline sales registered")
-    offline_revenue: float = Field(0.0, description="Offline revenue collected")
-    total_revenue: float = Field(0.0, description="Total revenue for interval")
+    total_orders: int = Field(0, description="Total orders placed on this date")
+    paid_orders: int = Field(0, description="Paid orders count on this date")
+    cod_orders: int = Field(0, description="COD orders count on this date")
+    pending_orders: int = Field(0, description="Pending orders count on this date")
+    total_revenue: float = Field(0.0, description="Total revenue collected on this date")
+    online_revenue: float = Field(0.0, description="Online revenue collected on this date")
+    cod_collected: float = Field(0.0, description="COD revenue collected on this date")
+    pending_payment: float = Field(0.0, description="Pending payment amount on this date")
     avg_order_value: float = Field(0.0, description="Average order value for interval")
 
 
 class SuperadminRevenueResponse(BaseModel):
-    """Complete Super Admin Revenue Analytics Response."""
-    preset: str = Field(..., description="Active filter preset, e.g. today, week, month, 3months, year, custom")
+    """Complete Super Admin Revenue & Sales Analytics Response."""
+    preset: str = Field(..., description="Active filter preset, e.g. today, yesterday, last_7_days, last_30_days, this_month, last_month, custom")
+    date_basis: str = Field("order_date", description="Date filter basis: 'order_date' or 'payment_date'")
     date_from: str = Field(..., description="ISO start date string")
     date_to: str = Field(..., description="ISO end date string")
     display_range: str = Field(..., description="Readable date range string, e.g. 01 Aug 2026 - 31 Aug 2026")
     
-    # 4 Primary KPI Cards
-    total_income: KPICardWithComparison = Field(..., description="Total income (Online + Offline)")
-    online_revenue: KPICardWithComparison = Field(..., description="Online order revenue")
-    offline_revenue: KPICardWithComparison = Field(..., description="Offline store revenue")
-    avg_order_value: KPICardWithComparison = Field(..., description="Average order value")
+    # 8 Primary KPI Cards
+    total_revenue: KPICardWithComparison = Field(..., description="Total revenue actually collected")
+    online_revenue: KPICardWithComparison = Field(..., description="Online order revenue collected")
+    cod_collected: KPICardWithComparison = Field(..., description="COD payments collected")
+    pending_payment: KPICardWithComparison = Field(..., description="Total amount in pending payment status")
+    total_orders: KPICardWithComparison = Field(..., description="Total placed orders count")
+    paid_orders: KPICardWithComparison = Field(..., description="Total paid orders count")
+    cod_orders: KPICardWithComparison = Field(..., description="Total COD orders count (paid + pending)")
+    pending_orders: KPICardWithComparison = Field(..., description="Total pending orders count")
     
-    # Trend Chart
+    # Multi-Series Trend Chart
     revenue_trend: List[RevenueTrendDataPoint] = Field(default_factory=list, description="Time series trend data")
     
-    # Distributions
-    revenue_by_source: RevenueBySource = Field(..., description="Revenue by source distribution")
+    # Payment Method Distributions
     revenue_by_payment_method: List[PaymentMethodRevenue] = Field(default_factory=list, description="Revenue by payment method breakdown")
     
-    # Detailed Summary Table
-    summary_rows: List[RevenueSummaryRow] = Field(default_factory=list, description="Detailed summary rows for datatable")
+    # Detailed Order Transactions Table
+    transactions: List[TransactionOrderRow] = Field(default_factory=list, description="Detailed transaction rows for orders table")
+    
+    # Summary Table Rows
+    summary_rows: List[RevenueSummaryRow] = Field(default_factory=list, description="Detailed summary rows for daily breakdown")

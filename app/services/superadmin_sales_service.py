@@ -13,6 +13,7 @@ from app.models.order import Order, OrderItem
 from app.models.product import Product
 from app.models.user import User
 from app.schemas.superadmin_sales import (
+    InventorySummary,
     OfflineLedgerItem,
     OfflineLedgerResponse,
     OnlineLedgerItem,
@@ -20,6 +21,8 @@ from app.schemas.superadmin_sales import (
     ProductSalesPerformanceItem,
     ProductSalesPerformanceResponse,
     SalesKPICard,
+    SalesMetricCard,
+    SalesTrendPoint,
 )
 
 
@@ -32,8 +35,16 @@ class SuperadminSalesService:
             return 100.0 if current > 0 else 0.0
         return round(((current - previous) / previous) * 100, 1)
 
-    async def get_sales_kpis(self) -> SalesKPICard:
-        """Calculate overall sales KPI metrics comparing current month vs last month."""
+    def _resolve_date_range(
+        self,
+        preset: str = "this_month",
+        date_from_iso: Optional[str] = None,
+        date_to_iso: Optional[str] = None,
+    ) -> Tuple[datetime, datetime, datetime, datetime, str, str, str, str]:
+        """
+        Resolves current and previous date boundaries in IST/UTC.
+        Returns (curr_start, curr_end, prev_start, prev_end, display_range, from_str, to_str, comp_label).
+        """
         try:
             from zoneinfo import ZoneInfo
             tz_ist = ZoneInfo("Asia/Kolkata")
@@ -42,268 +53,628 @@ class SuperadminSalesService:
             tz_ist = gettz("Asia/Kolkata") or timezone.utc
 
         now_ist = datetime.now(tz_ist)
-        curr_start_ist = datetime(now_ist.year, now_ist.month, 1, 0, 0, 0, tzinfo=tz_ist)
-        curr_end_ist = datetime(now_ist.year, now_ist.month, now_ist.day, 23, 59, 59, tzinfo=tz_ist)
+        today_start_ist = datetime(now_ist.year, now_ist.month, now_ist.day, 0, 0, 0, tzinfo=tz_ist)
+        today_end_ist = datetime(now_ist.year, now_ist.month, now_ist.day, 23, 59, 59, tzinfo=tz_ist)
 
-        curr_start = curr_start_ist.astimezone(timezone.utc)
-        curr_end = curr_end_ist.astimezone(timezone.utc)
+        clean_preset = (preset or "this_month").lower().strip()
 
-        if now_ist.month == 1:
-            prev_start_ist = datetime(now_ist.year - 1, 12, 1, 0, 0, 0, tzinfo=tz_ist)
+        if clean_preset == "today":
+            c_start = today_start_ist
+            c_end = today_end_ist
+            p_start = today_start_ist - timedelta(days=1)
+            p_end = today_start_ist - timedelta(seconds=1)
+            display_range = c_start.strftime("%d %b %Y")
+            comp_label = "vs yesterday"
+
+        elif clean_preset == "yesterday":
+            c_start = today_start_ist - timedelta(days=1)
+            c_end = today_start_ist - timedelta(seconds=1)
+            p_start = c_start - timedelta(days=1)
+            p_end = c_start - timedelta(seconds=1)
+            display_range = c_start.strftime("%d %b %Y")
+            comp_label = "vs day before"
+
+        elif clean_preset == "last_7_days":
+            c_start = today_start_ist - timedelta(days=6)
+            c_end = today_end_ist
+            p_start = c_start - timedelta(days=7)
+            p_end = c_start - timedelta(seconds=1)
+            display_range = f"{c_start.strftime('%d %b')} - {c_end.strftime('%d %b %Y')}"
+            comp_label = "vs previous 7 days"
+
+        elif clean_preset == "last_30_days":
+            c_start = today_start_ist - timedelta(days=29)
+            c_end = today_end_ist
+            p_start = c_start - timedelta(days=30)
+            p_end = c_start - timedelta(seconds=1)
+            display_range = f"{c_start.strftime('%d %b')} - {c_end.strftime('%d %b %Y')}"
+            comp_label = "vs previous 30 days"
+
+        elif clean_preset == "last_month":
+            if now_ist.month == 1:
+                lm_start = datetime(now_ist.year - 1, 12, 1, 0, 0, 0, tzinfo=tz_ist)
+            else:
+                lm_start = datetime(now_ist.year, now_ist.month - 1, 1, 0, 0, 0, tzinfo=tz_ist)
+            c_start = lm_start
+            c_end = today_start_ist.replace(day=1) - timedelta(seconds=1)
+
+            if lm_start.month == 1:
+                p_start = datetime(lm_start.year - 1, 12, 1, 0, 0, 0, tzinfo=tz_ist)
+            else:
+                p_start = datetime(lm_start.year, lm_start.month - 1, 1, 0, 0, 0, tzinfo=tz_ist)
+            p_end = c_start - timedelta(seconds=1)
+
+            display_range = f"{c_start.strftime('%d %b')} - {c_end.strftime('%d %b %Y')}"
+            comp_label = "vs month before"
+
+        elif clean_preset == "all_time":
+            c_start = datetime(2020, 1, 1, 0, 0, 0, tzinfo=tz_ist)
+            c_end = today_end_ist + timedelta(days=365)
+            p_start = c_start
+            p_end = c_end
+            display_range = "All Time"
+            comp_label = "all time"
+
+        elif clean_preset == "custom" and date_from_iso and date_to_iso:
+            try:
+                df = datetime.fromisoformat(date_from_iso.split("T")[0])
+                dt = datetime.fromisoformat(date_to_iso.split("T")[0])
+                c_start = datetime(df.year, df.month, df.day, 0, 0, 0, tzinfo=tz_ist)
+                c_end = datetime(dt.year, dt.month, dt.day, 23, 59, 59, tzinfo=tz_ist)
+                days_span = max(1, (c_end - c_start).days + 1)
+                p_start = c_start - timedelta(days=days_span)
+                p_end = c_start - timedelta(seconds=1)
+                display_range = f"{c_start.strftime('%d %b %Y')} - {c_end.strftime('%d %b %Y')}"
+                comp_label = "vs previous period"
+            except Exception:
+                c_start = datetime(now_ist.year, now_ist.month, 1, 0, 0, 0, tzinfo=tz_ist)
+                c_end = today_end_ist
+                p_start = datetime(now_ist.year, now_ist.month - 1 if now_ist.month > 1 else 12, 1, 0, 0, 0, tzinfo=tz_ist)
+                p_end = c_start - timedelta(seconds=1)
+                display_range = f"{c_start.strftime('%d %b')} - {c_end.strftime('%d %b %Y')}"
+                comp_label = "vs last month"
+
         else:
-            prev_start_ist = datetime(now_ist.year, now_ist.month - 1, 1, 0, 0, 0, tzinfo=tz_ist)
+            # this_month (Default)
+            c_start = datetime(now_ist.year, now_ist.month, 1, 0, 0, 0, tzinfo=tz_ist)
+            c_end = today_end_ist
+            if now_ist.month == 1:
+                p_start = datetime(now_ist.year - 1, 12, 1, 0, 0, 0, tzinfo=tz_ist)
+            else:
+                p_start = datetime(now_ist.year, now_ist.month - 1, 1, 0, 0, 0, tzinfo=tz_ist)
+            p_end = c_start - timedelta(seconds=1)
+            display_range = f"{c_start.strftime('%d %b')} - {c_end.strftime('%d %b %Y')}"
+            comp_label = "vs last month"
 
-        prev_start = prev_start_ist.astimezone(timezone.utc)
-        prev_end = curr_start - timedelta(seconds=1)
+        curr_start_utc = c_start.astimezone(timezone.utc)
+        curr_end_utc = c_end.astimezone(timezone.utc)
+        prev_start_utc = p_start.astimezone(timezone.utc)
+        prev_end_utc = p_end.astimezone(timezone.utc)
 
-        valid_statuses = ["Paid", "Delivered", "Shipped", "Processing"]
+        from_str = c_start.strftime("%Y-%m-%d")
+        to_str = c_end.strftime("%Y-%m-%d")
+
+        return (
+            curr_start_utc,
+            curr_end_utc,
+            prev_start_utc,
+            prev_end_utc,
+            display_range,
+            from_str,
+            to_str,
+            comp_label,
+        )
+
+    async def get_product_sales_performance(
+        self,
+        preset: str = "this_month",
+        search: Optional[str] = None,
+        category: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        page: int = 1,
+        limit: int = 10,
+    ) -> ProductSalesPerformanceResponse:
+        """
+        Fetch dynamic Sales, Orders, Stock KPIs, Sales Trend Curve, Inventory Summary,
+        and Product-wise Sales table strictly without revenue metrics.
+        """
+        # Resolve date boundaries for current and comparison periods
+        (
+            curr_start,
+            curr_end,
+            prev_start,
+            prev_end,
+            display_range,
+            from_str,
+            to_str,
+            comp_label,
+        ) = self._resolve_date_range(preset, date_from, date_to)
 
         # -------------------------------------------------------------------
-        # IMPORTANT: Revenue and Units must be computed in SEPARATE queries.
-        #
-        # If we JOIN Order with OrderItem in a single query and SUM Order.total,
-        # the order total gets counted once per item row — causing it to be
-        # doubled (or tripled, etc.) for multi-item orders.
-        #
-        # Correct approach:
-        #   - Revenue  → query Order directly (no OrderItem join)
-        #   - Units    → query OrderItem with the Order join
+        # 1. ORDER & UNITS AGGREGATIONS (CURRENT PERIOD)
         # -------------------------------------------------------------------
-
-        # Current period: online REVENUE (query Order directly — no join)
-        online_curr_rev_res = await self.db.execute(
-            select(func.coalesce(func.sum(Order.total), 0.0))
+        # Online Orders: All successfully placed orders in period (excluding cancelled)
+        online_orders_curr_res = await self.db.execute(
+            select(func.count(Order.id))
             .where(
                 Order.created_at >= curr_start,
                 Order.created_at <= curr_end,
-                func.upper(Order.payment_status) == "PAID",
+                func.upper(Order.status) != "CANCELLED",
             )
         )
-        online_curr_rev = online_curr_rev_res.scalar_one() or 0.0
+        online_orders_curr = online_orders_curr_res.scalar_one() or 0
 
-        # Current period: online UNITS (requires OrderItem join)
-        online_curr_units_res = await self.db.execute(
+        # Online Units Sold: Sum of item quantities in non-cancelled orders
+        online_units_curr_res = await self.db.execute(
             select(func.coalesce(func.sum(OrderItem.quantity), 0))
             .select_from(OrderItem)
             .join(Order, OrderItem.order_id == Order.id)
             .where(
                 Order.created_at >= curr_start,
                 Order.created_at <= curr_end,
-                func.upper(Order.payment_status) == "PAID",
+                func.upper(Order.status) != "CANCELLED",
             )
         )
-        online_curr_units = online_curr_units_res.scalar_one() or 0
+        online_units_curr = int(online_units_curr_res.scalar_one() or 0)
 
-        # Current period offline
+        # Offline Orders & Units Sold in period
         offline_curr_res = await self.db.execute(
             select(
+                func.count(OfflineSale.id),
                 func.coalesce(func.sum(OfflineSale.quantity), 0),
-                func.coalesce(func.sum(OfflineSale.total_price), 0.0),
             ).where(
                 OfflineSale.created_at >= curr_start,
                 OfflineSale.created_at <= curr_end,
             )
         )
-        offline_curr_units, offline_curr_rev = offline_curr_res.one()
+        offline_orders_curr, offline_units_curr = offline_curr_res.one()
+        offline_orders_curr = int(offline_orders_curr or 0)
+        offline_units_curr = int(offline_units_curr or 0)
 
-        # Previous period: online REVENUE (query Order directly — no join)
-        online_prev_rev_res = await self.db.execute(
-            select(func.coalesce(func.sum(Order.total), 0.0))
+        # Pending Orders: Placed orders awaiting processing/fulfillment
+        pending_orders_curr_res = await self.db.execute(
+            select(func.count(Order.id))
+            .where(
+                Order.created_at >= curr_start,
+                Order.created_at <= curr_end,
+                func.upper(Order.status).in_(["PENDING", "PROCESSING", "CONFIRMED", "PAYMENT_PENDING", "UNSHIPPED"]),
+            )
+        )
+        pending_orders_curr = int(pending_orders_curr_res.scalar_one() or 0)
+
+        # Cancelled Orders
+        cancelled_orders_curr_res = await self.db.execute(
+            select(func.count(Order.id))
+            .where(
+                Order.created_at >= curr_start,
+                Order.created_at <= curr_end,
+                func.upper(Order.status).in_(["CANCELLED", "REFUNDED"]),
+            )
+        )
+        cancelled_orders_curr = int(cancelled_orders_curr_res.scalar_one() or 0)
+
+        # Totals for current period
+        total_orders_curr = online_orders_curr + offline_orders_curr
+        total_units_curr = online_units_curr + offline_units_curr
+
+        # -------------------------------------------------------------------
+        # 2. ORDER & UNITS AGGREGATIONS (PREVIOUS PERIOD)
+        # -------------------------------------------------------------------
+        online_orders_prev_res = await self.db.execute(
+            select(func.count(Order.id))
             .where(
                 Order.created_at >= prev_start,
                 Order.created_at <= prev_end,
-                func.upper(Order.payment_status) == "PAID",
+                func.upper(Order.status) != "CANCELLED",
             )
         )
-        online_prev_rev = online_prev_rev_res.scalar_one() or 0.0
+        online_orders_prev = online_orders_prev_res.scalar_one() or 0
 
-        # Previous period: online UNITS (requires OrderItem join)
-        online_prev_units_res = await self.db.execute(
+        online_units_prev_res = await self.db.execute(
             select(func.coalesce(func.sum(OrderItem.quantity), 0))
             .select_from(OrderItem)
             .join(Order, OrderItem.order_id == Order.id)
             .where(
                 Order.created_at >= prev_start,
                 Order.created_at <= prev_end,
-                func.upper(Order.payment_status) == "PAID",
+                func.upper(Order.status) != "CANCELLED",
             )
         )
-        online_prev_units = online_prev_units_res.scalar_one() or 0
+        online_units_prev = int(online_units_prev_res.scalar_one() or 0)
 
-        # Previous period offline
         offline_prev_res = await self.db.execute(
             select(
+                func.count(OfflineSale.id),
                 func.coalesce(func.sum(OfflineSale.quantity), 0),
-                func.coalesce(func.sum(OfflineSale.total_price), 0.0),
             ).where(
                 OfflineSale.created_at >= prev_start,
                 OfflineSale.created_at <= prev_end,
             )
         )
-        offline_prev_units, offline_prev_rev = offline_prev_res.one()
+        offline_orders_prev, offline_units_prev = offline_prev_res.one()
+        offline_orders_prev = int(offline_orders_prev or 0)
+        offline_units_prev = int(offline_units_prev or 0)
 
-        total_curr_units = int(online_curr_units + offline_curr_units)
-        total_prev_units = int(online_prev_units + offline_prev_units)
+        pending_orders_prev_res = await self.db.execute(
+            select(func.count(Order.id))
+            .where(
+                Order.created_at >= prev_start,
+                Order.created_at <= prev_end,
+                func.upper(Order.status).in_(["PENDING", "PROCESSING", "CONFIRMED", "PAYMENT_PENDING", "UNSHIPPED"]),
+            )
+        )
+        pending_orders_prev = int(pending_orders_prev_res.scalar_one() or 0)
 
-        total_curr_rev = float(online_curr_rev + offline_curr_rev)
-        total_prev_rev = float(online_prev_rev + offline_prev_rev)
+        cancelled_orders_prev_res = await self.db.execute(
+            select(func.count(Order.id))
+            .where(
+                Order.created_at >= prev_start,
+                Order.created_at <= prev_end,
+                func.upper(Order.status).in_(["CANCELLED", "REFUNDED"]),
+            )
+        )
+        cancelled_orders_prev = int(cancelled_orders_prev_res.scalar_one() or 0)
 
-        # Top selling chocolate
-        top_prod_res = await self.db.execute(
-            select(Product.name, func.sum(OrderItem.quantity).label("units"))
-            .join(OrderItem, OrderItem.product_id == Product.id)
+        total_orders_prev = online_orders_prev + offline_orders_prev
+        total_units_prev = online_units_prev + offline_units_prev
+
+        # -------------------------------------------------------------------
+        # 3. REAL-TIME CATALOG STOCK METRICS
+        # -------------------------------------------------------------------
+        stock_sum_res = await self.db.execute(
+            select(func.coalesce(func.sum(Product.stock), 0)).where(Product.is_active.is_(True))
+        )
+        current_catalog_stock = int(stock_sum_res.scalar_one() or 0)
+
+        low_stock_res = await self.db.execute(
+            select(func.count(Product.id)).where(
+                Product.is_active.is_(True),
+                Product.stock <= 10,
+                Product.stock > 0,
+            )
+        )
+        low_stock_count = int(low_stock_res.scalar_one() or 0)
+
+        out_of_stock_res = await self.db.execute(
+            select(func.count(Product.id)).where(
+                Product.is_active.is_(True),
+                Product.stock <= 0,
+            )
+        )
+        out_of_stock_count = int(out_of_stock_res.scalar_one() or 0)
+
+        total_products_res = await self.db.execute(
+            select(func.count(Product.id)).where(Product.is_active.is_(True))
+        )
+        total_catalog_products = int(total_products_res.scalar_one() or 0)
+
+        # -------------------------------------------------------------------
+        # 4. BUILD 10 SALES & STOCK KPI CARDS
+        # -------------------------------------------------------------------
+        kpis = SalesKPICard(
+            total_orders=SalesMetricCard(
+                current_value=float(total_orders_curr),
+                previous_value=float(total_orders_prev),
+                percentage_change=self._calc_pct_change(total_orders_curr, total_orders_prev),
+                comparison_label=comp_label,
+            ),
+            total_units_sold=SalesMetricCard(
+                current_value=float(total_units_curr),
+                previous_value=float(total_units_prev),
+                percentage_change=self._calc_pct_change(total_units_curr, total_units_prev),
+                comparison_label=comp_label,
+            ),
+            online_orders=SalesMetricCard(
+                current_value=float(online_orders_curr),
+                previous_value=float(online_orders_prev),
+                percentage_change=self._calc_pct_change(online_orders_curr, online_orders_prev),
+                comparison_label=comp_label,
+            ),
+            online_units_sold=SalesMetricCard(
+                current_value=float(online_units_curr),
+                previous_value=float(online_units_prev),
+                percentage_change=self._calc_pct_change(online_units_curr, online_units_prev),
+                comparison_label=comp_label,
+            ),
+            offline_orders=SalesMetricCard(
+                current_value=float(offline_orders_curr),
+                previous_value=float(offline_orders_prev),
+                percentage_change=self._calc_pct_change(offline_orders_curr, offline_orders_prev),
+                comparison_label=comp_label,
+            ),
+            offline_units_sold=SalesMetricCard(
+                current_value=float(offline_units_curr),
+                previous_value=float(offline_units_prev),
+                percentage_change=self._calc_pct_change(offline_units_curr, offline_units_prev),
+                comparison_label=comp_label,
+            ),
+            pending_orders=SalesMetricCard(
+                current_value=float(pending_orders_curr),
+                previous_value=float(pending_orders_prev),
+                percentage_change=self._calc_pct_change(pending_orders_curr, pending_orders_prev),
+                comparison_label=comp_label,
+            ),
+            cancelled_orders=SalesMetricCard(
+                current_value=float(cancelled_orders_curr),
+                previous_value=float(cancelled_orders_prev),
+                percentage_change=self._calc_pct_change(cancelled_orders_curr, cancelled_orders_prev),
+                comparison_label=comp_label,
+            ),
+            current_stock=SalesMetricCard(
+                current_value=float(current_catalog_stock),
+                previous_value=float(current_catalog_stock),
+                percentage_change=0.0,
+                comparison_label="live catalog",
+            ),
+            low_stock_products=SalesMetricCard(
+                current_value=float(low_stock_count + out_of_stock_count),
+                previous_value=float(low_stock_count + out_of_stock_count),
+                percentage_change=0.0,
+                comparison_label=f"{out_of_stock_count} out of stock",
+            ),
+        )
+
+        # -------------------------------------------------------------------
+        # 5. SALES TREND TIME-SERIES CURVE
+        # -------------------------------------------------------------------
+        trend_days = max(1, min(60, (curr_end.date() - curr_start.date()).days + 1))
+        trend_map: Dict[str, Dict[str, int]] = {}
+
+        for d in range(trend_days):
+            day_dt = curr_start.date() + timedelta(days=d)
+            key = day_dt.strftime("%d %b")
+            trend_map[key] = {
+                "total_orders": 0,
+                "online_orders": 0,
+                "offline_orders": 0,
+                "total_units": 0,
+                "online_units": 0,
+                "offline_units": 0,
+            }
+
+        # Daily Online Orders & Units
+        daily_online_orders_res = await self.db.execute(
+            select(
+                func.date(Order.created_at).label("day"),
+                func.count(Order.id).label("orders"),
+            )
+            .where(
+                Order.created_at >= curr_start,
+                Order.created_at <= curr_end,
+                func.upper(Order.status) != "CANCELLED",
+            )
+            .group_by(func.date(Order.created_at))
+        )
+        for day_val, ord_count in daily_online_orders_res.all():
+            k = day_val.strftime("%d %b") if hasattr(day_val, "strftime") else str(day_val)
+            if k in trend_map:
+                trend_map[k]["online_orders"] += int(ord_count)
+                trend_map[k]["total_orders"] += int(ord_count)
+
+        daily_online_units_res = await self.db.execute(
+            select(
+                func.date(Order.created_at).label("day"),
+                func.coalesce(func.sum(OrderItem.quantity), 0).label("units"),
+            )
+            .select_from(OrderItem)
             .join(Order, OrderItem.order_id == Order.id)
-            .where(func.upper(Order.payment_status) == "PAID")
-            .group_by(Product.name)
-            .order_by(func.sum(OrderItem.quantity).desc())
-            .limit(1)
+            .where(
+                Order.created_at >= curr_start,
+                Order.created_at <= curr_end,
+                func.upper(Order.status) != "CANCELLED",
+            )
+            .group_by(func.date(Order.created_at))
         )
-        top_prod_row = top_prod_res.first()
-        top_chocolate = top_prod_row[0] if top_prod_row else "Belgian Dark Truffle Bar"
+        for day_val, unit_count in daily_online_units_res.all():
+            k = day_val.strftime("%d %b") if hasattr(day_val, "strftime") else str(day_val)
+            if k in trend_map:
+                trend_map[k]["online_units"] += int(unit_count)
+                trend_map[k]["total_units"] += int(unit_count)
 
-        return SalesKPICard(
-            total_units_sold=total_curr_units,
-            total_units_prev=total_prev_units,
-            units_pct_change=self._calc_pct_change(total_curr_units, total_prev_units),
-            total_revenue=round(total_curr_rev, 2),
-            total_revenue_prev=round(total_prev_rev, 2),
-            revenue_pct_change=self._calc_pct_change(total_curr_rev, total_prev_rev),
-            online_revenue=round(float(online_curr_rev), 2),
-            online_revenue_prev=round(float(online_prev_rev), 2),
-            online_pct_change=self._calc_pct_change(online_curr_rev, online_prev_rev),
-            offline_revenue=round(float(offline_curr_rev), 2),
-            offline_revenue_prev=round(float(offline_prev_rev), 2),
-            offline_pct_change=self._calc_pct_change(offline_curr_rev, offline_prev_rev),
-            top_selling_chocolate=top_chocolate,
-            comparison_label="vs last month",
+        # Daily Offline Sales & Units
+        daily_offline_res = await self.db.execute(
+            select(
+                func.date(OfflineSale.created_at).label("day"),
+                func.count(OfflineSale.id).label("sales_count"),
+                func.coalesce(func.sum(OfflineSale.quantity), 0).label("units"),
+            )
+            .where(
+                OfflineSale.created_at >= curr_start,
+                OfflineSale.created_at <= curr_end,
+            )
+            .group_by(func.date(OfflineSale.created_at))
+        )
+        for day_val, off_count, off_units in daily_offline_res.all():
+            k = day_val.strftime("%d %b") if hasattr(day_val, "strftime") else str(day_val)
+            if k in trend_map:
+                trend_map[k]["offline_orders"] += int(off_count)
+                trend_map[k]["total_orders"] += int(off_count)
+                trend_map[k]["offline_units"] += int(off_units)
+                trend_map[k]["total_units"] += int(off_units)
+
+        sales_trend: List[SalesTrendPoint] = [
+            SalesTrendPoint(
+                date=k,
+                total_orders=v["total_orders"],
+                online_orders=v["online_orders"],
+                offline_orders=v["offline_orders"],
+                total_units=v["total_units"],
+                online_units=v["online_units"],
+                offline_units=v["offline_units"],
+            )
+            for k, v in trend_map.items()
+        ]
+
+        # -------------------------------------------------------------------
+        # 6. INVENTORY SUMMARY
+        # -------------------------------------------------------------------
+        inventory_summary = InventorySummary(
+            current_stock=current_catalog_stock,
+            sold_quantity=total_units_curr,
+            low_stock_count=low_stock_count,
+            out_of_stock_count=out_of_stock_count,
+            total_catalog_products=total_catalog_products,
         )
 
-    async def get_product_sales_performance(
-        self,
-        search: Optional[str] = None,
-        date_from: Optional[datetime] = None,
-        date_to: Optional[datetime] = None,
-        page: int = 1,
-        limit: int = 10,
-    ) -> ProductSalesPerformanceResponse:
-        """Fetch aggregated product performance table and KPI metrics."""
-        kpis = await self.get_sales_kpis()
+        # -------------------------------------------------------------------
+        # 7. PRODUCT-WISE SALES TABLE
+        # -------------------------------------------------------------------
+        prod_stmt = (
+            select(Product)
+            .outerjoin(Category, Product.category_id == Category.id)
+            .where(Product.is_active.is_(True))
+        )
+        if search and search.strip():
+            s = f"%{search.strip()}%"
+            prod_stmt = prod_stmt.where(or_(Product.name.ilike(s), Category.name.ilike(s)))
+        if category and category.upper() != "ALL":
+            prod_stmt = prod_stmt.where(Category.name.ilike(f"%{category.strip()}%"))
 
-        # Query all products
-        stmt = select(Product)
-        if search:
-            stmt = stmt.where(Product.name.ilike(f"%{search}%"))
-
-        products_res = await self.db.execute(stmt)
+        products_res = await self.db.execute(prod_stmt)
         products = products_res.scalars().all()
 
-        valid_statuses = ["Paid", "Delivered", "Shipped", "Processing"]
-
-        # Fetch online units & revenue per product
-        online_stmt = (
+        # Online units per product in date range
+        online_prod_units_stmt = (
             select(
                 OrderItem.product_id,
                 func.coalesce(func.sum(OrderItem.quantity), 0).label("units"),
-                func.coalesce(func.sum(OrderItem.quantity * OrderItem.price), 0.0).label("revenue"),
             )
+            .select_from(OrderItem)
             .join(Order, OrderItem.order_id == Order.id)
-            .where(func.upper(Order.payment_status) == "PAID")
+            .where(
+                Order.created_at >= curr_start,
+                Order.created_at <= curr_end,
+                func.upper(Order.status) != "CANCELLED",
+            )
+            .group_by(OrderItem.product_id)
         )
-        if date_from:
-            online_stmt = online_stmt.where(Order.created_at >= date_from)
-        if date_to:
-            online_stmt = online_stmt.where(Order.created_at <= date_to)
-        online_stmt = online_stmt.group_by(OrderItem.product_id)
+        online_prod_units_res = await self.db.execute(online_prod_units_stmt)
+        online_prod_map = {p_id: int(u) for p_id, u in online_prod_units_res.all()}
 
-        online_data_res = await self.db.execute(online_stmt)
-        online_map = {p_id: (int(u), float(r)) for p_id, u, r in online_data_res.all()}
-
-        # Fetch offline sales per product name
-        offline_stmt = select(
-            OfflineSale.product_name,
-            func.coalesce(func.sum(OfflineSale.quantity), 0).label("units"),
-            func.coalesce(func.sum(OfflineSale.total_price), 0.0).label("revenue"),
+        # Offline units per product name in date range
+        offline_prod_units_stmt = (
+            select(
+                OfflineSale.product_name,
+                func.coalesce(func.sum(OfflineSale.quantity), 0).label("units"),
+            )
+            .where(
+                OfflineSale.created_at >= curr_start,
+                OfflineSale.created_at <= curr_end,
+            )
+            .group_by(OfflineSale.product_name)
         )
-        if date_from:
-            offline_stmt = offline_stmt.where(OfflineSale.created_at >= date_from)
-        if date_to:
-            offline_stmt = offline_stmt.where(OfflineSale.created_at <= date_to)
-        offline_stmt = offline_stmt.group_by(OfflineSale.product_name)
+        offline_prod_units_res = await self.db.execute(offline_prod_units_stmt)
+        offline_prod_map = {name.lower(): int(u) for name, u in offline_prod_units_res.all()}
 
-        offline_data_res = await self.db.execute(offline_stmt)
-        offline_map = {name.lower(): (int(u), float(r)) for name, u, r in offline_data_res.all()}
-
-        performance_items: List[ProductSalesPerformanceItem] = []
-
+        product_items: List[ProductSalesPerformanceItem] = []
         for prod in products:
-            on_units, on_rev = online_map.get(prod.id, (0, 0.0))
-            off_units, off_rev = offline_map.get(prod.name.lower(), (0, 0.0))
+            on_u = online_prod_map.get(prod.id, 0)
+            off_u = offline_prod_map.get(prod.name.lower(), 0)
+            tot_u = on_u + off_u
 
-            tot_units = on_units + off_units
-            tot_rev = round(on_rev + off_rev, 2)
+            cat_str = str(prod.category).title() if prod.category else "Chocolates"
 
-            cat_name = str(prod.category).title() if prod.category else "Chocolates"
-
-            performance_items.append(
+            product_items.append(
                 ProductSalesPerformanceItem(
                     id=prod.id,
                     name=prod.name,
-                    category_name=cat_name,
+                    category_name=cat_str,
                     image_url=prod.image,
                     price=float(prod.price),
-                    online_units=on_units,
-                    offline_units=off_units,
-                    total_units=tot_units,
-                    total_revenue=tot_rev,
-                    stock_available=int(prod.stock if prod.stock is not None else 0),
+                    units_sold=tot_u,
+                    online_units=on_u,
+                    offline_units=off_u,
+                    current_stock=int(prod.stock if prod.stock is not None else 0),
                 )
             )
 
-        # Sort by total revenue descending
-        performance_items.sort(key=lambda x: x.total_revenue, reverse=True)
+        # Sort products by total units sold descending
+        product_items.sort(key=lambda p: (p.units_sold, p.current_stock), reverse=True)
 
-        total_count = len(performance_items)
+        total_matching_products = len(product_items)
         offset = (page - 1) * limit
-        paginated_items = performance_items[offset : offset + limit]
+        paginated_products = product_items[offset : offset + limit]
 
         return ProductSalesPerformanceResponse(
+            preset=preset,
+            date_from=from_str,
+            date_to=to_str,
+            display_range=display_range,
             kpis=kpis,
-            products=paginated_items,
-            total=total_count,
+            sales_trend=sales_trend,
+            inventory_summary=inventory_summary,
+            products=paginated_products,
+            total_products=total_matching_products,
+            page=page,
+            limit=limit,
+        )
+
+    async def get_sales_analytics(
+        self,
+        preset: str = "this_month",
+        search: Optional[str] = None,
+        category: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        page: int = 1,
+        limit: int = 10,
+    ) -> ProductSalesPerformanceResponse:
+        """Alias for get_product_sales_performance."""
+        return await self.get_product_sales_performance(
+            preset=preset,
+            search=search,
+            category=category,
+            date_from=date_from,
+            date_to=date_to,
             page=page,
             limit=limit,
         )
 
     async def get_online_sales_ledger(
         self,
+        preset: Optional[str] = None,
         search: Optional[str] = None,
         status_filter: Optional[str] = None,
         payment_method: Optional[str] = None,
         payment_status_filter: Optional[str] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
+        date_from_iso: Optional[str] = None,
+        date_to_iso: Optional[str] = None,
         page: int = 1,
         limit: int = 10,
     ) -> OnlineLedgerResponse:
-        """Fetch paginated online sales ledger from orders table."""
+        """Fetch paginated online sales ledger from orders table with preset support."""
         stmt = select(Order).options(selectinload(Order.user), selectinload(Order.items))
 
-        if search:
+        # Handle period preset filtering
+        if preset and preset.lower() != "all_time":
+            (c_start, c_end, *_) = self._resolve_date_range(preset, date_from_iso, date_to_iso)
+            stmt = stmt.where(Order.created_at >= c_start, Order.created_at <= c_end)
+        elif date_from or date_to:
+            if date_from:
+                stmt = stmt.where(Order.created_at >= date_from)
+            if date_to:
+                stmt = stmt.where(Order.created_at <= date_to)
+
+        if search and search.strip():
+            s = f"%{search.strip()}%"
             stmt = stmt.join(User, Order.user_id == User.id, isouter=True).where(
                 or_(
-                    Order.id.ilike(f"%{search}%"),
-                    User.full_name.ilike(f"%{search}%"),
-                    User.email.ilike(f"%{search}%"),
+                    Order.id.ilike(s),
+                    User.full_name.ilike(s),
+                    User.email.ilike(s),
                 )
             )
 
         if status_filter and status_filter.upper() != "ALL":
-            stmt = stmt.where(Order.status == status_filter)
+            stmt = stmt.where(func.upper(Order.status) == status_filter.strip().upper())
 
         if payment_method and payment_method.upper() != "ALL":
-            stmt = stmt.where(Order.payment_method.ilike(f"%{payment_method}%"))
+            stmt = stmt.where(Order.payment_method.ilike(f"%{payment_method.strip()}%"))
 
-        if payment_status_filter:
+        if payment_status_filter and payment_status_filter.upper() != "ALL":
             psf = payment_status_filter.lower()
             if psf == "completed":
                 stmt = stmt.where(func.upper(Order.payment_status) == "PAID")
@@ -313,11 +684,6 @@ class SuperadminSalesService:
                 stmt = stmt.where(func.upper(Order.payment_status).in_(["FAILED", "CANCELLED", "REFUNDED", "REFUND PENDING", "PARTIALLY REFUNDED"]))
             else:
                 stmt = stmt.where(func.upper(Order.payment_status) == psf.upper())
-
-        if date_from:
-            stmt = stmt.where(Order.created_at >= date_from)
-        if date_to:
-            stmt = stmt.where(Order.created_at <= date_to)
 
         # Count total matching orders
         count_stmt = select(func.count()).select_from(stmt.subquery())
@@ -331,7 +697,7 @@ class SuperadminSalesService:
 
         items: List[OnlineLedgerItem] = []
         for ord_obj in orders:
-            cust_name = ord_obj.user.full_name if ord_obj.user else "Guest Customer"
+            cust_name = ord_obj.user.full_name if ord_obj.user else "Customer"
             cust_email = ord_obj.user.email if ord_obj.user else "N/A"
 
             # Create product summary string
@@ -342,23 +708,35 @@ class SuperadminSalesService:
                     tot_qty += itm.quantity
                     p_name = itm.product.name if itm.product else "Chocolate Item"
                     prod_names.append(f"{p_name} (x{itm.quantity})")
-            
-            prod_summary = ", ".join(prod_names) if prod_names else "Luxury Chocolates"
 
-            display_ord_id = f"ORD-{ord_obj.id[:8].upper()}" if len(ord_obj.id) > 12 else ord_obj.id
+            prod_summary = ", ".join(prod_names) if prod_names else "Assorted Chocolates"
+
+            # Clean & proper Order ID resolution: never chop or double-prefix
+            ord_raw = str(ord_obj.id or "")
+            if ord_raw.upper().startswith("ORD-"):
+                display_ord_id = ord_raw
+            elif len(ord_raw) > 12:
+                display_ord_id = f"ORD-{ord_raw[:8].upper()}"
+            else:
+                display_ord_id = ord_raw
 
             items.append(
                 OnlineLedgerItem(
                     id=ord_obj.id,
                     order_id=display_ord_id,
-                    created_at=ord_obj.created_at.strftime("%d %b %Y, %I:%M %p"),
+                    created_at=ord_obj.created_at.strftime("%d %b %Y, %I:%M %p") if ord_obj.created_at else "Recent",
                     customer_name=cust_name,
                     customer_email=cust_email,
                     product_summary=prod_summary,
                     quantity=tot_qty if tot_qty > 0 else 1,
                     payment_method=ord_obj.payment_method or "UPI",
-                    amount=round(float(ord_obj.total), 2),
+                    amount=round(float(ord_obj.total or 0.0), 2),
                     order_status=ord_obj.status or "Processing",
+                    payment_status=ord_obj.payment_status or "PAID",
+                    subtotal=round(float(ord_obj.subtotal or ord_obj.total or 0.0), 2),
+                    discount=round(float(ord_obj.discount or ord_obj.coupon_discount or 0.0), 2),
+                    delivery_option=ord_obj.delivery_option or "Standard Delivery",
+                    shipping_address=ord_obj.shipping_address if isinstance(ord_obj.shipping_address, dict) else None,
                 )
             )
 
@@ -371,31 +749,43 @@ class SuperadminSalesService:
 
     async def get_offline_sales_ledger(
         self,
+        preset: Optional[str] = None,
         search: Optional[str] = None,
         payment_method: Optional[str] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
+        date_from_iso: Optional[str] = None,
+        date_to_iso: Optional[str] = None,
         page: int = 1,
         limit: int = 10,
     ) -> OfflineLedgerResponse:
-        """Fetch paginated offline sales ledger from offline_sales table."""
+        """Fetch paginated offline sales ledger from offline_sales table with preset support."""
         stmt = select(OfflineSale)
 
-        if search:
+        # Handle period preset filtering
+        if preset and preset.lower() != "all_time":
+            (c_start, c_end, *_) = self._resolve_date_range(preset, date_from_iso, date_to_iso)
+            stmt = stmt.where(OfflineSale.created_at >= c_start, OfflineSale.created_at <= c_end)
+        elif date_from or date_to:
+            if date_from:
+                stmt = stmt.where(OfflineSale.created_at >= date_from)
+            if date_to:
+                stmt = stmt.where(OfflineSale.created_at <= date_to)
+
+        if search and search.strip():
+            s = f"%{search.strip()}%"
             stmt = stmt.where(
                 or_(
-                    OfflineSale.id.ilike(f"%{search}%"),
-                    OfflineSale.product_name.ilike(f"%{search}%"),
+                    OfflineSale.id.ilike(s),
+                    OfflineSale.product_name.ilike(s),
+                    OfflineSale.receipt_id.ilike(s),
+                    OfflineSale.company_name.ilike(s),
+                    OfflineSale.contact_person.ilike(s),
                 )
             )
 
         if payment_method and payment_method.upper() != "ALL":
-            stmt = stmt.where(OfflineSale.payment_method.ilike(f"%{payment_method}%"))
-
-        if date_from:
-            stmt = stmt.where(OfflineSale.created_at >= date_from)
-        if date_to:
-            stmt = stmt.where(OfflineSale.created_at <= date_to)
+            stmt = stmt.where(OfflineSale.payment_method.ilike(f"%{payment_method.strip()}%"))
 
         # Count total matching offline sales
         count_stmt = select(func.count()).select_from(stmt.subquery())
@@ -409,17 +799,27 @@ class SuperadminSalesService:
 
         items: List[OfflineLedgerItem] = []
         for sale in sales:
-            display_receipt_id = f"POS-{sale.id[:8].upper()}"
+            rec_id = getattr(sale, 'receipt_id', None) or getattr(sale, 'receipt_number', None)
+            if rec_id:
+                clean_rec = str(rec_id).strip()
+                display_receipt_id = clean_rec if clean_rec.upper().startswith("POS-") or clean_rec.upper().startswith("OFF-") else f"POS-{clean_rec}"
+            else:
+                display_receipt_id = f"POS-{sale.id[:8].upper()}"
+
+            cust_name = getattr(sale, 'company_name', None) or getattr(sale, 'contact_person', None) or "Walk-in Customer"
+            phone = getattr(sale, 'phone', None) or "N/A"
 
             items.append(
                 OfflineLedgerItem(
                     id=sale.id,
                     receipt_id=display_receipt_id,
-                    created_at=sale.created_at.strftime("%d %b %Y, %I:%M %p"),
-                    product_name=sale.product_name,
-                    quantity=sale.quantity,
+                    created_at=sale.created_at.strftime("%d %b %Y, %I:%M %p") if sale.created_at else "Recent",
+                    product_name=sale.product_name or "Handcrafted Chocolate Box",
+                    quantity=sale.quantity if sale.quantity else 1,
                     payment_method=sale.payment_method or "Cash",
-                    amount=round(float(sale.total_price), 2),
+                    amount=round(float(sale.total_price or sale.total_amount or 0.0), 2),
+                    customer_name=cust_name,
+                    phone=phone,
                 )
             )
 
@@ -433,17 +833,20 @@ class SuperadminSalesService:
     async def generate_sales_csv(
         self,
         tab: str = "products",
+        preset: str = "this_month",
         search: Optional[str] = None,
-        date_from: Optional[datetime] = None,
-        date_to: Optional[datetime] = None,
+        category: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
     ) -> str:
         """Generates CSV report based on active tab view."""
         output = io.StringIO()
         writer = csv.writer(output)
 
         if tab == "online":
-            ledger = await self.get_online_sales_ledger(search=search, date_from=date_from, date_to=date_to, page=1, limit=1000)
-            writer.writerow(["CHOVIQUE ONLINE SALES LEDGER"])
+            (c_start, c_end, *_) = self._resolve_date_range(preset, date_from, date_to)
+            ledger = await self.get_online_sales_ledger(preset=preset, search=search, date_from_iso=date_from, date_to_iso=date_to, page=1, limit=5000)
+            writer.writerow(["CHOVIQUE ONLINE ORDERS REPORT"])
             writer.writerow(["Order ID", "Date", "Customer Name", "Customer Email", "Products Purchased", "Quantity", "Payment Method", "Amount (INR)", "Order Status"])
             for item in ledger.items:
                 writer.writerow([
@@ -459,13 +862,16 @@ class SuperadminSalesService:
                 ])
 
         elif tab == "offline":
-            ledger = await self.get_offline_sales_ledger(search=search, date_from=date_from, date_to=date_to, page=1, limit=1000)
-            writer.writerow(["CHOVIQUE OFFLINE BOUTIQUE SALES LEDGER"])
-            writer.writerow(["Receipt ID", "Date", "Product Name", "Quantity", "Payment Method", "Amount (INR)"])
+            (c_start, c_end, *_) = self._resolve_date_range(preset, date_from, date_to)
+            ledger = await self.get_offline_sales_ledger(preset=preset, search=search, date_from_iso=date_from, date_to_iso=date_to, page=1, limit=5000)
+            writer.writerow(["CHOVIQUE IN-STORE SALES REPORT"])
+            writer.writerow(["Receipt ID", "Date", "Customer / Company", "Phone", "Product Name", "Quantity", "Payment Method", "Amount (INR)"])
             for item in ledger.items:
                 writer.writerow([
                     item.receipt_id,
                     item.created_at,
+                    item.customer_name or "Walk-in Customer",
+                    item.phone or "N/A",
                     item.product_name,
                     item.quantity,
                     item.payment_method,
@@ -473,20 +879,42 @@ class SuperadminSalesService:
                 ])
 
         else:
-            # Products tab (Default)
-            perf = await self.get_product_sales_performance(search=search, date_from=date_from, date_to=date_to, page=1, limit=1000)
-            writer.writerow(["CHOVIQUE PRODUCT SALES & STOCK PERFORMANCE REPORT"])
-            writer.writerow(["Product Name", "Category", "Price (INR)", "Online Units", "Offline Units", "Total Units Sold", "Total Revenue (INR)", "Stock Available"])
+            # Products Sales & Stock (Default)
+            perf = await self.get_product_sales_performance(
+                preset=preset,
+                search=search,
+                category=category,
+                date_from=date_from,
+                date_to=date_to,
+                page=1,
+                limit=5000,
+            )
+            writer.writerow(["CHOVIQUE PRODUCT SALES & STOCK REPORT"])
+            writer.writerow([f"Period: {perf.display_range}"])
+            writer.writerow([])
+            writer.writerow(["SUMMARY KPIS"])
+            writer.writerow(["Total Orders", int(perf.kpis.total_orders.current_value)])
+            writer.writerow(["Total Units Sold", int(perf.kpis.total_units_sold.current_value)])
+            writer.writerow(["Online Orders", int(perf.kpis.online_orders.current_value)])
+            writer.writerow(["Online Units Sold", int(perf.kpis.online_units_sold.current_value)])
+            writer.writerow(["Offline Orders", int(perf.kpis.offline_orders.current_value)])
+            writer.writerow(["Offline Units Sold", int(perf.kpis.offline_units_sold.current_value)])
+            writer.writerow(["Pending Orders", int(perf.kpis.pending_orders.current_value)])
+            writer.writerow(["Cancelled Orders", int(perf.kpis.cancelled_orders.current_value)])
+            writer.writerow(["Current Available Stock", int(perf.kpis.current_stock.current_value)])
+            writer.writerow(["Low Stock / Out of Stock Products", int(perf.kpis.low_stock_products.current_value)])
+            writer.writerow([])
+            writer.writerow(["PRODUCT-WISE SALES & STOCK PERFORMANCE"])
+            writer.writerow(["Product Name", "Category", "Price (INR)", "Units Sold", "Online Units", "Offline Units", "Current Stock"])
             for item in perf.products:
                 writer.writerow([
                     item.name,
                     item.category_name,
                     item.price,
+                    item.units_sold,
                     item.online_units,
                     item.offline_units,
-                    item.total_units,
-                    item.total_revenue,
-                    item.stock_available,
+                    item.current_stock,
                 ])
 
         return output.getvalue()

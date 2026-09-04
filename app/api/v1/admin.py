@@ -2076,6 +2076,37 @@ async def delete_reel(
     return None
 
 
+@router.patch(
+    "/reels/{reel_id}",
+    response_model=ReelResponse,
+    summary="Update an Instagram reel (admin only)",
+)
+async def update_reel(
+    reel_id: str,
+    title: Optional[str] = Form(default=None),
+    likes: Optional[str] = Form(default=None),
+    comments: Optional[str] = Form(default=None),
+    views: Optional[str] = Form(default=None),
+    video_url: Optional[str] = Form(default=None),
+    video: UploadFile = File(default=None),
+    current_user: User = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminService(db)
+    try:
+        return await service.update_reel(
+            reel_id,
+            title=title,
+            likes=likes,
+            comments=comments,
+            views=views,
+            video_url=video_url,
+            video_file=video if (video and video.filename) else None,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
 # ======================================================
 # CMS — TESTIMONIALS
 # ======================================================

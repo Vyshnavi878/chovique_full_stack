@@ -105,6 +105,7 @@ class PaymentService:
         order = await self.order_repo.get_by_id(payment.order_id)
         if order and order.payment_status != "PAID":
             order.payment_status = "PAID"
+            order.paid_at = func.now()
             order.status = "Processing"
 
             # Atomic Inventory Deduction

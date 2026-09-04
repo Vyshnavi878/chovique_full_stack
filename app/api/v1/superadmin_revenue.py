@@ -19,9 +19,10 @@ router = APIRouter(prefix="/superadmin/analytics/revenue", tags=["Super Admin Re
     summary="Get Super Admin Revenue Analytics Data",
 )
 async def get_superadmin_revenue(
-    preset: str = Query("month", description="Filter preset: today, week, month, 3months, year, custom"),
+    preset: str = Query("this_month", description="Filter preset: today, yesterday, last_7_days, last_30_days, this_month, last_month, custom"),
     date_from: Optional[str] = Query(None, description="ISO start date (YYYY-MM-DD)"),
     date_to: Optional[str] = Query(None, description="ISO end date (YYYY-MM-DD)"),
+    date_basis: str = Query("order_date", description="Date basis: 'order_date' or 'payment_date'"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("superadmin")),
 ):
@@ -61,6 +62,7 @@ async def get_superadmin_revenue(
         preset=preset,
         date_from=parsed_start,
         date_to=parsed_end,
+        date_basis=date_basis,
     )
 
 
@@ -69,9 +71,10 @@ async def get_superadmin_revenue(
     summary="Export Revenue Analytics as CSV",
 )
 async def export_superadmin_revenue_csv(
-    preset: str = Query("month", description="Filter preset: today, week, month, 3months, year, custom"),
+    preset: str = Query("this_month", description="Filter preset: today, yesterday, last_7_days, last_30_days, this_month, last_month, custom"),
     date_from: Optional[str] = Query(None, description="ISO start date (YYYY-MM-DD)"),
     date_to: Optional[str] = Query(None, description="ISO end date (YYYY-MM-DD)"),
+    date_basis: str = Query("order_date", description="Date basis: 'order_date' or 'payment_date'"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("superadmin")),
 ):
@@ -105,6 +108,7 @@ async def export_superadmin_revenue_csv(
         preset=preset,
         date_from=parsed_start,
         date_to=parsed_end,
+        date_basis=date_basis,
     )
 
     filename = f"revenue_analytics_{preset}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"

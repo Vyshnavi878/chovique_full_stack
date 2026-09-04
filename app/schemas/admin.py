@@ -135,6 +135,8 @@ class CustomerDetailsResponse(BaseModel):
     joined_date: str = ""
     recent_orders: list[OrderResponse]
     support_tickets: list[SupportTicketResponse]
+    default_address: Optional[dict] = None
+    addresses: list[dict] = []
 
 
 class CustomerUpdatePayload(BaseModel):

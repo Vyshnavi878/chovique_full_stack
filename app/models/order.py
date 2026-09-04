@@ -35,6 +35,7 @@ class Order(Base):
     invoice_url = Column(String(500), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    paid_at = Column(DateTime(timezone=True), nullable=True, index=True)
     delivered_at = Column(DateTime(timezone=True), nullable=True)
     cancelled_at = Column(DateTime(timezone=True), nullable=True)
     cancellation_reason = Column(Text, nullable=True)

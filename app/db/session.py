@@ -85,6 +85,8 @@ async def init_db() -> None:
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS images JSON;",
             # Orders
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) NOT NULL DEFAULT 'PENDING';",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ;",
+            "UPDATE orders SET paid_at = created_at WHERE UPPER(payment_status) = 'PAID' AND paid_at IS NULL;",
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_url VARCHAR(500);",
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS tax DOUBLE PRECISION NOT NULL DEFAULT 0.0;",
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping DOUBLE PRECISION NOT NULL DEFAULT 0.0;",

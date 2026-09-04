@@ -35,6 +35,17 @@ class ReelRepository:
             await self.db.delete(reel)
             await self.db.commit()
 
+    async def update(self, reel_id: str, **kwargs) -> InstagramReel | None:
+        reel = await self.get_by_id(reel_id)
+        if not reel:
+            return None
+        for key, value in kwargs.items():
+            if value is not None:
+                setattr(reel, key, value)
+        await self.db.commit()
+        await self.db.refresh(reel)
+        return reel
+
     async def count(self) -> int:
         from sqlalchemy import func
         result = await self.db.execute(select(func.count()).select_from(InstagramReel))

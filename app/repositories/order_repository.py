@@ -95,6 +95,7 @@ class OrderRepository:
             payment_method=payment_method,
             status="Processing",
             payment_status=payment_status,
+            paid_at=func.now() if payment_status.upper() == "PAID" else None,
         )
         self.db.add(order)
         await self.db.flush()

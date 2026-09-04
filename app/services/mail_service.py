@@ -63,10 +63,11 @@ def _build_otp_html(name: str, otp: str, heading: str, body_text: str, footer_no
     """
 
 
-def _send_sync_smtp(email: str, subject: str, html_body: str, port: int) -> None:
+def _send_sync_smtp(email: str, subject: str, html_body: str) -> None:
     """
-    Send an email synchronously using Python's native smtplib socket implementation.
-    This avoids uvloop/aiosmtplib event-loop bugs on Linux/Render.
+    Send an email synchronously using Python's native smtplib.
+    - Port 465: direct SMTP_SSL
+    - Port 587 (or any other): SMTP with STARTTLS upgrade
     """
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -75,20 +76,22 @@ def _send_sync_smtp(email: str, subject: str, html_body: str, port: int) -> None
     msg["To"] = email
     msg.attach(MIMEText(html_body, "html"))
 
-    timeout = min(getattr(settings, "MAIL_TIMEOUT", 3), 3)
+    timeout = min(getattr(settings, "MAIL_TIMEOUT", 30), 30)
     server_host = settings.MAIL_SERVER
+    port = settings.MAIL_PORT
 
     if port == 465:
+        # Direct SSL connection
         with smtplib.SMTP_SSL(server_host, port, timeout=timeout) as server:
             if settings.MAIL_USERNAME and settings.MAIL_PASSWORD:
                 server.login(settings.MAIL_USERNAME, settings.MAIL_PASSWORD)
             server.send_message(msg)
     else:
+        # Port 587 / STARTTLS
         with smtplib.SMTP(server_host, port, timeout=timeout) as server:
             server.ehlo()
-            if getattr(settings, "MAIL_STARTTLS", True):
-                server.starttls()
-                server.ehlo()
+            server.starttls()
+            server.ehlo()
             if settings.MAIL_USERNAME and settings.MAIL_PASSWORD:
                 server.login(settings.MAIL_USERNAME, settings.MAIL_PASSWORD)
             server.send_message(msg)
@@ -104,82 +107,26 @@ async def _send_mail_dispatcher(
     """
     Unified mail dispatcher:
     1. If fallback_otp is provided, log it clearly for dev/monitoring/backup access.
-    2. Attempts Resend HTTP REST API if RESEND_API_KEY is configured (HTTPS port 443).
-    3. Dispatches native smtplib in a background thread to primary SMTP port (e.g. 587 or 465).
-    4. Retries on fallback SMTP port (465 SSL or 587 STARTTLS) if primary fails.
-    5. Gracefully handles cloud network blocks (e.g. Render blocking SMTP ports) so the user flow is preserved.
+    2. Dispatches native smtplib in a background thread over SMTP_SSL to GoDaddy (or other provider).
     """
     if fallback_otp:
+        # We do not expose OTP in ERROR logs, only as INFO for Dev mode backups
         logger.info("[OTP BACKUP] %s OTP for %s: %s", context_label, email, fallback_otp)
 
     logger.info("%s email: sending to %s", context_label, email)
 
-    # 1. Resend HTTPS REST API (Port 443, never blocked by cloud firewalls)
-    resend_api_key = getattr(settings, "RESEND_API_KEY", None)
-    if resend_api_key and resend_api_key.strip():
-        try:
-            from_email = settings.MAIL_FROM or "Chovique Chocolatier <onboarding@resend.dev>"
-            async with httpx.AsyncClient(timeout=4.0) as client:
-                resp = await client.post(
-                    "https://api.resend.com/emails",
-                    headers={
-                        "Authorization": f"Bearer {resend_api_key.strip()}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "from": from_email,
-                        "to": [email],
-                        "subject": subject,
-                        "html": html_body,
-                    },
-                )
-                if resp.is_success:
-                    logger.info("%s email: sent successfully to %s via Resend API", context_label, email)
-                    return True
-                else:
-                    logger.warning(
-                        "Resend API returned %s for %s email to %s. Falling back to SMTP...",
-                        resp.status_code,
-                        context_label,
-                        email,
-                    )
-        except Exception as resend_err:
-            logger.warning(
-                "Resend API request failed for %s email to %s (%s). Falling back to SMTP...",
-                context_label,
-                email,
-                resend_err,
-            )
-
-    # 2. Native SMTP via background thread (Auto-prioritize port 465 for Gmail on cloud hosts)
-    if "gmail.com" in settings.MAIL_SERVER.lower():
-        ports_to_try = [465, 587] if settings.MAIL_PORT in [465, 587] else [settings.MAIL_PORT, 465]
-    else:
-        primary_port = settings.MAIL_PORT
-        fallback_port = 465 if primary_port == 587 else (587 if primary_port == 465 else None)
-        ports_to_try = [primary_port] + ([fallback_port] if fallback_port else [])
-
-    last_error: Optional[Exception] = None
-    for port in ports_to_try:
-        try:
-            await asyncio.to_thread(_send_sync_smtp, email, subject, html_body, port)
-            logger.info("%s email: sent successfully to %s via %s:%d", context_label, email, settings.MAIL_SERVER, port)
-            return True
-        except Exception as err:
-            last_error = err
-            logger.debug("%s email attempt on %s:%d failed: %s", context_label, settings.MAIL_SERVER, port, err)
-
-    safe_error_str = str(last_error) if last_error else "Network unreachable or SMTP credentials unconfigured"
-    logger.error("%s email failed for %s: %s", context_label, email, safe_error_str)
-
-    if settings.DEBUG:
-        if fallback_otp:
-            print(f"\n==========================================")
-            print(f"[DEV MODE - OTP] {context_label} for {email}: {fallback_otp}")
-            print(f"==========================================\n")
-
-    # Return True so customer actions / registration flows are not aborted when host blocks raw SMTP ports
-    return True
+    try:
+        await asyncio.to_thread(_send_sync_smtp, email, subject, html_body)
+        logger.info("%s email: sent successfully to %s via %s:%d", context_label, email, settings.MAIL_SERVER, settings.MAIL_PORT)
+        return True
+    except Exception as err:
+        # Catch and log error gracefully without exposing sensitive credentials
+        safe_error_str = str(err) or "Unknown SMTP error"
+        logger.error("%s email failed for %s: %s", context_label, email, safe_error_str)
+        
+        # Return True so customer actions / registration flows are not completely aborted 
+        # (Allows them to use backup OTP printed in logs if desired during dev/testing)
+        return True
 
 
 class MailService:
