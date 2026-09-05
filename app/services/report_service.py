@@ -7,6 +7,7 @@ from sqlalchemy import select, func, text, and_, or_, inspect, case
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.category import Category
 from app.models.order import Order, OrderItem
 from app.models.offline_sale import OfflineSale
 from app.models.product import Product
@@ -325,63 +326,85 @@ class ReportService:
     async def _generate_products_report(
         self, start_dt: datetime, end_dt: datetime, req: ReportQueryRequest
     ) -> ReportResponse:
-        # Aggregated product sales from OrderItem using (price * quantity)
-        query = (
+        # 1. Query online product sales in date range
+        online_prod_stmt = (
             select(
-                Product.id,
-                Product.name,
-                Product.category,
-                Product.stock,
+                OrderItem.product_id,
                 func.coalesce(func.sum(OrderItem.quantity), 0).label("units_sold"),
-                func.coalesce(func.sum(OrderItem.price * OrderItem.quantity), 0.0).label("revenue")
+                func.coalesce(func.sum(OrderItem.price * OrderItem.quantity), 0.0).label("revenue"),
             )
             .select_from(OrderItem)
-            .join(Product, OrderItem.product_id == Product.id)
             .join(Order, OrderItem.order_id == Order.id)
             .where(
                 Order.created_at >= start_dt,
                 Order.created_at <= end_dt,
-                Order.status != "CANCELLED",
-                Order.status != "Cancelled"
+                func.upper(Order.status) != "CANCELLED",
             )
-            .group_by(Product.id, Product.name, Product.category, Product.stock)
-            .order_by(text("revenue DESC"))
+            .group_by(OrderItem.product_id)
         )
+        online_prod_res = await self.db.execute(online_prod_stmt)
+        sales_map = {p_id: (int(u), float(rev)) for p_id, u, rev in online_prod_res.all()}
 
-        all_res = (await self.db.execute(query)).all()
-        total_records = len(all_res)
+        # 2. Query active catalog products with category
+        prod_stmt = (
+            select(Product, Category.name.label("category_name"))
+            .outerjoin(Category, Product.category_id == Category.id)
+            .where(Product.is_active.is_(True))
+        )
+        products_res = await self.db.execute(prod_stmt)
+        products = products_res.all()
 
-        total_units = sum(r.units_sold for r in all_res)
-        total_prod_rev = sum(float(r.revenue) for r in all_res)
+        product_list = []
+        for p, cat_name in products:
+            units, rev = sales_map.get(p.id, (0, 0.0))
+            product_list.append({
+                "id": p.id,
+                "name": p.name,
+                "category": cat_name or "Gourmet Chocolates",
+                "units_sold": units,
+                "stock": p.stock,
+                "revenue": rev,
+            })
+
+        # Sort: highest revenue first, then highest units sold, then by name
+        product_list.sort(key=lambda x: (x["revenue"], x["units_sold"]), reverse=True)
+
+        total_records = len(product_list)
+        total_units = sum(x["units_sold"] for x in product_list)
+        total_prod_rev = sum(x["revenue"] for x in product_list)
+        sold_products_count = sum(1 for x in product_list if x["units_sold"] > 0)
 
         offset = (req.page - 1) * req.limit
-        page_items = all_res[offset : offset + req.limit]
+        page_items = product_list[offset : offset + req.limit]
 
         table_rows = [
             [
-                r.name,
-                r.category or "Gourmet Chocolates",
-                f"{r.units_sold:,}",
-                r.stock,
-                f"₹{float(r.revenue):,.2f}",
+                r["name"],
+                r["category"],
+                f"{r['units_sold']:,}",
+                r["stock"],
+                f"₹{r['revenue']:,.2f}",
             ]
             for r in page_items
         ]
 
         chart_data = [
             ReportChartPoint(
-                label=r.name[:15] + ("..." if len(r.name) > 15 else ""),
-                value=float(r.revenue),
-                secondary_value=float(r.units_sold)
+                label=r["name"][:15] + ("..." if len(r["name"]) > 15 else ""),
+                value=float(r["revenue"]),
+                secondary_value=float(r["units_sold"])
             )
-            for r in all_res[:10]
+            for r in product_list[:10]
         ]
 
+        top_performer_name = product_list[0]["name"] if product_list and product_list[0]["units_sold"] > 0 else "N/A"
+        top_performer_sub = f"₹{product_list[0]['revenue']:,.2f}" if product_list and product_list[0]["units_sold"] > 0 else "₹0.00"
+
         kpis = [
-            ReportKPICard(title="Products Sold", value=f"{len(all_res):,}", subtext="Unique catalog items sold"),
+            ReportKPICard(title="Products Sold", value=f"{sold_products_count:,}", subtext=f"Out of {total_records} catalog items"),
             ReportKPICard(title="Total Units Sold", value=f"{total_units:,}", subtext="Total pieces / boxes"),
             ReportKPICard(title="Product Revenue", value=f"₹{total_prod_rev:,.2f}", subtext="Gross item revenue"),
-            ReportKPICard(title="Top Performer", value=all_res[0].name if all_res else "N/A", subtext=f"₹{float(all_res[0].revenue):,.2f}" if all_res else "₹0.00"),
+            ReportKPICard(title="Top Performer", value=top_performer_name, subtext=top_performer_sub),
         ]
 
         total_pages = math.ceil(total_records / req.limit) if total_records > 0 else 1
