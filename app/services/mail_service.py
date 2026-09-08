@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -17,6 +18,94 @@ logger = logging.getLogger(__name__)
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 
+
+# ---------------------------------------------------------------------------
+# Brevo HTTP API helpers (port 443 — works on Render free tier)
+# ---------------------------------------------------------------------------
+
+BREVO_API_URL = "https://api.brevo.com/v3/smtp/email"
+
+
+def _read_asset_b64(path: Path) -> Optional[str]:
+    """Return base64-encoded content of an asset file, or None if missing."""
+    try:
+        return base64.b64encode(path.read_bytes()).decode()
+    except Exception:
+        return None
+
+
+async def _send_via_brevo_api(email: str, subject: str, html_body: str) -> bool:
+    """
+    Send an email using the Brevo Transactional Email REST API.
+    Uses HTTPS (port 443) — bypasses all SMTP port blocks on cloud hosts.
+    Embeds the banner and logo as base64 attachments with Content-ID.
+
+    Returns True on success, raises on failure.
+    """
+    from_name = getattr(settings, "MAIL_FROM_NAME", "Chovique Chocolatier")
+    from_email = settings.MAIL_FROM or settings.MAIL_USERNAME
+
+    payload: dict = {
+        "sender": {"name": from_name, "email": from_email},
+        "to": [{"email": email}],
+        "subject": subject,
+        "htmlContent": html_body,
+    }
+
+    # Attach inline images if HTML references them via CID
+    inline_attachments = []
+    has_banner = "cid:chovique_banner" in html_body
+    has_logo = "cid:chovique_logo" in html_body
+
+    if has_banner:
+        banner_path = ASSETS_DIR / "email-banner.jpg"
+        if not banner_path.exists():
+            banner_path = ASSETS_DIR / "popular-bg.jpg"
+        b64 = _read_asset_b64(banner_path) if banner_path.exists() else None
+        if b64:
+            inline_attachments.append({
+                "name": "banner.jpg",
+                "content": b64,
+                "contentType": "image/jpeg",
+                "contentId": "chovique_banner",
+                "disposition": "inline",
+            })
+
+    if has_logo:
+        logo_path = ASSETS_DIR / "logo.png"
+        b64 = _read_asset_b64(logo_path) if logo_path.exists() else None
+        if b64:
+            inline_attachments.append({
+                "name": "logo.png",
+                "content": b64,
+                "contentType": "image/png",
+                "contentId": "chovique_logo",
+                "disposition": "inline",
+            })
+
+    if inline_attachments:
+        payload["attachment"] = inline_attachments
+
+    headers = {
+        "accept": "application/json",
+        "api-key": settings.BREVO_API_KEY,
+        "content-type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(BREVO_API_URL, json=payload, headers=headers)
+
+    if resp.status_code in (200, 201):
+        return True
+
+    raise RuntimeError(
+        f"Brevo API error {resp.status_code}: {resp.text[:300]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# SMTP fallback (works locally; blocked on Render free tier)
+# ---------------------------------------------------------------------------
 
 def get_mail_config(port: int | None = None) -> ConnectionConfig:
     """Build ConnectionConfig for compatibility."""
@@ -42,24 +131,6 @@ def get_mail_config(port: int | None = None) -> ConnectionConfig:
         USE_CREDENTIALS=True,
         VALIDATE_CERTS=True,
         TIMEOUT=getattr(settings, "MAIL_TIMEOUT", 5),
-    )
-
-
-def _otp_expiry_minutes() -> int:
-    """Return OTP validity in whole minutes."""
-    return settings.OTP_EXPIRE_SECONDS // 60
-
-
-def _build_otp_html(name: str, otp: str, heading: str, body_text: str, footer_note: str) -> str:
-    """Render a consistent, luxury Chovique-branded OTP email HTML body."""
-    expiry_minutes = _otp_expiry_minutes()
-    return build_otp_template(
-        name=name,
-        otp=otp,
-        heading=heading,
-        body_text=body_text,
-        footer_note=footer_note,
-        expiry_minutes=expiry_minutes,
     )
 
 
@@ -134,6 +205,10 @@ def _send_sync_smtp(email: str, subject: str, html_body: str, port: int) -> None
             server.send_message(msg)
 
 
+# ---------------------------------------------------------------------------
+# Unified dispatcher: API first, SMTP fallback
+# ---------------------------------------------------------------------------
+
 async def _send_mail_dispatcher(
     email: str,
     subject: str,
@@ -142,34 +217,90 @@ async def _send_mail_dispatcher(
     fallback_otp: str | None = None,
 ) -> bool:
     """
-    Unified mail dispatcher with automatic dual-port fallback:
-    1. If fallback_otp is provided, log it clearly for dev/monitoring backup access.
-    2. Tries primary port (e.g. 587 STARTTLS).
-    3. If primary port fails or times out, immediately retries on fallback port (465 SSL) or vice versa.
+    Unified mail dispatcher:
+    1. Logs OTP backup for monitoring (if provided).
+    2. TRIES Brevo HTTP API first (works on Render — uses HTTPS port 443).
+    3. If API key is missing or API call fails, falls back to SMTP port 587, then 465.
+
+    This ensures emails always work whether deployed on Render (cloud) or locally.
     """
     if fallback_otp:
         logger.info("[OTP BACKUP] %s OTP for %s: %s", context_label, email, fallback_otp)
 
     logger.info("%s email: sending to %s", context_label, email)
 
-    primary_port = settings.MAIL_PORT or 587
-    fallback_port = 465 if primary_port == 587 else 587
-    ports_to_try = [primary_port, fallback_port]
-
-    last_error: Optional[Exception] = None
-    for port in ports_to_try:
+    # --- Primary: Brevo HTTP API (cloud-safe, no port restrictions) ---
+    if settings.BREVO_API_KEY:
         try:
-            await asyncio.to_thread(_send_sync_smtp, email, subject, html_body, port)
-            logger.info("%s email: sent successfully to %s via %s:%d", context_label, email, settings.MAIL_SERVER, port)
+            await _send_via_brevo_api(email, subject, html_body)
+            logger.info(
+                "%s email: sent successfully to %s via Brevo HTTP API",
+                context_label, email,
+            )
             return True
-        except Exception as err:
-            last_error = err
-            logger.warning("%s email attempt on %s:%d failed (%s). Retrying next port if available...", context_label, settings.MAIL_SERVER, port, err)
+        except Exception as api_err:
+            logger.warning(
+                "%s email: Brevo API failed (%s). Falling back to SMTP...",
+                context_label, api_err,
+            )
 
-    safe_error_str = str(last_error) if last_error else "Unknown SMTP error"
-    logger.error("%s email failed for %s: %s", context_label, email, safe_error_str)
-    return True
+    # --- Fallback: SMTP (works locally, blocked on Render free tier) ---
+    if settings.MAIL_SERVER and settings.MAIL_USERNAME and settings.MAIL_PASSWORD:
+        primary_port = settings.MAIL_PORT or 587
+        fallback_port = 465 if primary_port == 587 else 587
+        last_error: Optional[Exception] = None
 
+        for port in [primary_port, fallback_port]:
+            try:
+                await asyncio.to_thread(_send_sync_smtp, email, subject, html_body, port)
+                logger.info(
+                    "%s email: sent successfully to %s via SMTP %s:%d",
+                    context_label, email, settings.MAIL_SERVER, port,
+                )
+                return True
+            except Exception as smtp_err:
+                last_error = smtp_err
+                logger.warning(
+                    "%s email: SMTP %s:%d failed (%s). Trying next...",
+                    context_label, settings.MAIL_SERVER, port, smtp_err,
+                )
+
+        safe_error = str(last_error) if last_error else "Unknown SMTP error"
+        logger.error("%s email failed for %s: %s", context_label, email, safe_error)
+    else:
+        logger.error(
+            "%s email failed for %s: No BREVO_API_KEY and no SMTP credentials configured.",
+            context_label, email,
+        )
+
+    return True  # Return True to not block the user-facing response
+
+
+# ---------------------------------------------------------------------------
+# OTP helpers
+# ---------------------------------------------------------------------------
+
+def _otp_expiry_minutes() -> int:
+    """Return OTP validity in whole minutes."""
+    return settings.OTP_EXPIRE_SECONDS // 60
+
+
+def _build_otp_html(name: str, otp: str, heading: str, body_text: str, footer_note: str) -> str:
+    """Render a consistent, luxury Chovique-branded OTP email HTML body."""
+    expiry_minutes = _otp_expiry_minutes()
+    return build_otp_template(
+        name=name,
+        otp=otp,
+        heading=heading,
+        body_text=body_text,
+        footer_note=footer_note,
+        expiry_minutes=expiry_minutes,
+    )
+
+
+# ---------------------------------------------------------------------------
+# MailService
+# ---------------------------------------------------------------------------
 
 class MailService:
 

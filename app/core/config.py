@@ -176,6 +176,10 @@ class Settings(BaseSettings):
     MAIL_SSL_TLS: bool = False
     MAIL_TIMEOUT: int = 10
 
+    # Brevo HTTP API key — preferred over SMTP on cloud hosts (Render, Railway, etc.)
+    # Get from: Brevo Dashboard → Settings → SMTP & API → API Keys
+    BREVO_API_KEY: str = ""
+
     @field_validator("MAIL_TIMEOUT", mode="before")
     @classmethod
     def parse_mail_timeout(cls, value):
