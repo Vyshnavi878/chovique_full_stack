@@ -43,16 +43,24 @@ class CheckoutService:
         """
         logger.info("Initiating checkout for user %s", user_id)
 
-        if not payload.items:
+        items_to_process = payload.items
+        if not items_to_process:
+            user_cart = await self.cart_repo.get_or_create_user_cart(user_id, commit=False)
+            items_to_process = [
+                type("CartItemPayload", (), {"product_id": ci.product_id, "quantity": ci.quantity})()
+                for ci in (getattr(user_cart, "items", []) or [])
+            ]
+
+        if not items_to_process:
             raise ValueError("Checkout items list cannot be empty.")
 
         subtotal = 0.0
         items_data = []
 
         # Step 1: Validate stock & prices server-side
-        for item in payload.items:
+        for item in items_to_process:
             product = await self.product_repo.get_by_id(item.product_id)
-            if not product or not product.is_active:
+            if not product or not product.is_active or getattr(product, "is_available", True) is False:
                 raise ValueError(f"Product '{item.product_id}' is unavailable.")
 
             if product.stock < item.quantity:
@@ -82,29 +90,59 @@ class CheckoutService:
                 logger.warning("Coupon %s invalid during checkout initiation: %s", payload.coupon_code, coupon_res.message)
                 raise ValueError(coupon_res.message or "Invalid or inapplicable coupon code.")
 
-        # Step 3: Calculate shipping & tax
-        shipping = 0.0 if subtotal > 1500 else 99.0
-        tax = round(subtotal * 0.05, 2)  # 5% GST
-        total = max(0.0, subtotal - discount + shipping + tax)
+        # Step 3: Coin redemption validation
+        coins_used = 0
+        coin_discount = 0.0
+        if getattr(payload, "coins_to_use", 0) and payload.coins_to_use > 0:
+            from app.services.wallet_service import WalletService
+            wallet_service = WalletService(self.db)
+            redemption_calc = await wallet_service.calculate_redemption(
+                user_id=user_id,
+                subtotal=subtotal,
+                coupon_discount=discount,
+                coins_requested=payload.coins_to_use,
+            )
+            if redemption_calc.user_balance < payload.coins_to_use:
+                raise ValueError(f"Insufficient coin balance. Available: {redemption_calc.user_balance} coins.")
+            if redemption_calc.allowed_coins > 0:
+                coins_used = redemption_calc.allowed_coins
+                coin_discount = redemption_calc.coin_discount
 
+        # Step 4: Calculate shipping & tax using PlatformSettings
+        from app.repositories.platform_settings_repository import PlatformSettingsRepository
+        ps_repo = PlatformSettingsRepository(self.db)
+        ps = await ps_repo.get()
+
+        if ps.free_shipping_min_order > 0 and subtotal >= ps.free_shipping_min_order:
+            shipping = 0.0
+        else:
+            shipping = ps.standard_shipping_charge
+
+        tax = round(subtotal * (ps.gst_rate / 100.0), 2)
+        total_discount = discount + coin_discount
+        total = max(0.0, subtotal - total_discount + shipping + tax)
         total_rounded = round(total, 2)
 
-        # Step 4: Create Pending Order in DB
+        # Step 5: Create Pending Order in DB
         shipping_addr_dict = payload.shipping_address.model_dump()
         order = await self.order_repo.create_order(
             user_id=user_id,
             total=total_rounded,
             subtotal=round(subtotal, 2),
-            discount=round(discount, 2),
+            discount=round(total_discount, 2),
             shipping=round(shipping, 2),
             tax=round(tax, 2),
             shipping_address=shipping_addr_dict,
             delivery_option=payload.delivery_option,
             payment_method=payload.payment_method,
             items_data=items_data,
+            coupon_code=payload.coupon_code if discount > 0 else None,
+            coupon_discount=round(discount, 2),
+            coins_used=coins_used,
+            coin_discount=round(coin_discount, 2),
         )
 
-        # Step 5: Initiate Razorpay Order
+        # Step 6: Initiate Razorpay Order
         razorpay_order = razorpay_client.create_order(
             amount=total_rounded,
             currency="INR",
@@ -112,7 +150,7 @@ class CheckoutService:
             notes={"user_id": user_id, "order_id": order.id},
         )
 
-        # Step 6: Create Payment record in DB
+        # Step 7: Create Payment record in DB
         payment = await self.payment_repo.create_payment(
             order_id=order.id,
             user_id=user_id,
@@ -124,11 +162,11 @@ class CheckoutService:
         return {
             "order_id": order.id,
             "razorpay_order_id": razorpay_order.get("id"),
-            "amount": total_rounded,
+            "amount": razorpay_order.get("amount"),  # in paise for Razorpay frontend SDK
             "currency": "INR",
             "key_id": razorpay_client.key_id,
             "subtotal": subtotal,
-            "discount": discount,
+            "discount": total_discount,
             "shipping": shipping,
             "tax": tax,
         }

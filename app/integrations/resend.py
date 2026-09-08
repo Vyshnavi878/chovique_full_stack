@@ -2,6 +2,19 @@ import logging
 from typing import Optional, List, Dict, Any
 import httpx
 from app.core.config import settings
+from app.services.email_template import (
+    render_luxury_email,
+    build_welcome_template,
+    build_order_confirmation_template,
+    build_shipping_template,
+    build_out_for_delivery_template,
+    build_delivered_template,
+    build_cancellation_template,
+    build_refund_template,
+    build_coins_template,
+    build_ticket_template,
+    build_generic_notification_template,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,89 +59,141 @@ class ResendEmailIntegration:
 
     async def send_superadmin_new_admin(self, super_admin_email: str, super_admin_name: str, admin_name: str, admin_email: str, created_at: str):
         subject = "New Admin Account Created"
-        html = f"""
-        <p>Hello {super_admin_name},</p>
-        <p>A new admin account has been created on {self.platform_name}.</p>
-        <p><strong>Admin Details:</strong></p>
-        <ul>
-            <li><strong>Name:</strong> {admin_name}</li>
-            <li><strong>Email:</strong> {admin_email}</li>
-            <li><strong>Created On:</strong> {created_at}</li>
-        </ul>
-        <p>Please review the admin account from the Admin Management section.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        rows = [
+            ("Admin Name", admin_name),
+            ("Admin Email", admin_email),
+            ("Created On", created_at),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="New Admin Staff Onboarded",
+            recipient_name=super_admin_name,
+            badge_text="Staff Management",
+            body_paragraphs=[
+                f"A new administrator account has been created on <strong>{self.platform_name}</strong>.",
+                "Please review their permission profile from the Admin Console if any role adjustments are needed.",
+            ],
+            key_values=rows,
+        )
         return await self.send_email(super_admin_email, subject, html)
 
     async def send_superadmin_admin_activated(self, super_admin_email: str, super_admin_name: str, admin_name: str, admin_email: str, activated_at: str):
         subject = "Admin Account Activated"
-        html = f"""
-        <p>Hello {super_admin_name},</p>
-        <p>The admin account for <strong>{admin_name}</strong> ({admin_email}) has been activated successfully.</p>
-        <p><strong>Activated On:</strong> {activated_at}</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        rows = [
+            ("Admin Name", admin_name),
+            ("Admin Email", admin_email),
+            ("Activated On", activated_at),
+            ("Status", "Active"),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="Admin Account Activated",
+            recipient_name=super_admin_name,
+            badge_text="Account Activated",
+            body_paragraphs=[
+                f"The administrative account for <strong>{admin_name}</strong> ({admin_email}) has been successfully activated.",
+            ],
+            key_values=rows,
+        )
         return await self.send_email(super_admin_email, subject, html)
 
     async def send_superadmin_admin_deactivated(self, super_admin_email: str, super_admin_name: str, admin_name: str, admin_email: str, deactivated_at: str):
         subject = "Admin Account Deactivated"
-        html = f"""
-        <p>Hello {super_admin_name},</p>
-        <p>The admin account for <strong>{admin_name}</strong> ({admin_email}) has been deactivated.</p>
-        <p><strong>Deactivated On:</strong> {deactivated_at}</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        rows = [
+            ("Admin Name", admin_name),
+            ("Admin Email", admin_email),
+            ("Deactivated On", deactivated_at),
+            ("Status", "Deactivated"),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="Admin Account Deactivated",
+            recipient_name=super_admin_name,
+            badge_text="Account Deactivated",
+            body_paragraphs=[
+                f"The administrator account for <strong>{admin_name}</strong> ({admin_email}) has been deactivated.",
+            ],
+            key_values=rows,
+        )
         return await self.send_email(super_admin_email, subject, html)
 
     async def send_superadmin_admin_updated(self, super_admin_email: str, super_admin_name: str, admin_name: str, admin_email: str, updated_at: str):
         subject = "Admin Profile Updated"
-        html = f"""
-        <p>Hello {super_admin_name},</p>
-        <p>The profile of admin <strong>{admin_name}</strong> has been updated.</p>
-        <p><strong>Admin Email:</strong> {admin_email}<br/><strong>Updated On:</strong> {updated_at}</p>
-        <p>Please review the changes from Admin Management if required.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        rows = [
+            ("Admin Name", admin_name),
+            ("Admin Email", admin_email),
+            ("Updated On", updated_at),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="Admin Profile Changed",
+            recipient_name=super_admin_name,
+            badge_text="Profile Update",
+            body_paragraphs=[
+                f"The profile details for admin <strong>{admin_name}</strong> ({admin_email}) were updated.",
+            ],
+            key_values=rows,
+        )
         return await self.send_email(super_admin_email, subject, html)
 
     async def send_superadmin_admin_password_updated(self, super_admin_email: str, super_admin_name: str, admin_name: str, admin_email: str, updated_at: str):
         subject = "Admin Password Updated"
-        html = f"""
-        <p>Hello {super_admin_name},</p>
-        <p>The password for admin account <strong>{admin_email}</strong> was updated.</p>
-        <p><strong>Admin:</strong> {admin_name}<br/><strong>Updated On:</strong> {updated_at}</p>
-        <p>If this activity was unexpected, please review the admin account immediately.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Security Team</p>
-        """
+        rows = [
+            ("Admin Name", admin_name),
+            ("Admin Email", admin_email),
+            ("Updated On", updated_at),
+            ("Security Action", "Password Reset / Changed"),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="Admin Credential Update",
+            recipient_name=super_admin_name,
+            badge_text="Security Notice",
+            body_paragraphs=[
+                f"The access password for administrator <strong>{admin_email}</strong> was updated.",
+                "If this activity was not authorized, please lock the account immediately.",
+            ],
+            key_values=rows,
+        )
         return await self.send_email(super_admin_email, subject, html)
 
     async def send_superadmin_security_alert(self, super_admin_email: str, super_admin_name: str, admin_email: str, security_event: str, detected_at: str):
         subject = "Admin Security Alert"
-        html = f"""
-        <p>Hello {super_admin_name},</p>
-        <p>A security event was detected for admin account <strong>{admin_email}</strong>.</p>
-        <p><strong>Event:</strong> {security_event}<br/><strong>Detected On:</strong> {detected_at}</p>
-        <p>Please review the account and take appropriate action if required.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Security Team</p>
-        """
+        rows = [
+            ("Admin Account", admin_email),
+            ("Security Event", security_event),
+            ("Detected On", detected_at),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="Platform Security Alert",
+            recipient_name=super_admin_name,
+            badge_text="Security Alert",
+            body_paragraphs=[
+                f"A security event was logged on the administrative console for account <strong>{admin_email}</strong>.",
+                "Please review recent audit logs and IP sessions to ensure platform integrity.",
+            ],
+            key_values=rows,
+        )
         return await self.send_email(super_admin_email, subject, html)
 
     async def send_superadmin_platform_alert(self, super_admin_email: str, super_admin_name: str, alert_title: str, alert_message: str, occurred_at: str):
-        subject = "Critical Platform Alert"
-        html = f"""
-        <p>Hello {super_admin_name},</p>
-        <p>A critical platform event requires your attention.</p>
-        <p><strong>Alert:</strong> {alert_title}<br/><strong>Details:</strong> {alert_message}<br/><strong>Occurred On:</strong> {occurred_at}</p>
-        <p>Please review the platform immediately.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        subject = f"Critical Platform Alert: {alert_title}"
+        rows = [
+            ("Alert Title", alert_title),
+            ("Occurred On", occurred_at),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline=f"Critical Alert: {alert_title}",
+            recipient_name=super_admin_name,
+            badge_text="Critical System Event",
+            body_paragraphs=[
+                alert_message,
+                "Immediate administrator review recommended.",
+            ],
+            key_values=rows,
+        )
         return await self.send_email(super_admin_email, subject, html)
 
     # ==========================================================
@@ -137,333 +202,405 @@ class ResendEmailIntegration:
 
     async def send_admin_new_order(self, admin_email: str, admin_name: str, order_id: str, customer_name: str, order_total: float, payment_status: str, order_date: str):
         subject = f"New Order Received – #{order_id}"
-        html = f"""
-        <p>Hello {admin_name},</p>
-        <p>A new order has been placed.</p>
-        <ul>
-            <li><strong>Order ID:</strong> #{order_id}</li>
-            <li><strong>Customer:</strong> {customer_name}</li>
-            <li><strong>Order Amount:</strong> ₹{order_total:,.2f}</li>
-            <li><strong>Payment Status:</strong> {payment_status}</li>
-            <li><strong>Order Date:</strong> {order_date}</li>
-        </ul>
-        <p>Please review the order from the Admin Dashboard.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        rows = [
+            ("Order ID", f"#{order_id}"),
+            ("Customer Name", customer_name),
+            ("Total Amount", f"₹{order_total:,.2f}"),
+            ("Payment Status", payment_status.title()),
+            ("Order Date", order_date or "Today"),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="New Customer Order Placed",
+            recipient_name=admin_name,
+            badge_text="New Order",
+            body_paragraphs=[
+                f"A new order <strong>#{order_id}</strong> has been received from <strong>{customer_name}</strong>.",
+                "Please review items and assign for artisanal preparation.",
+            ],
+            key_values=rows,
+        )
         return await self.send_email(admin_email, subject, html)
 
     async def send_admin_payment_success(self, admin_email: str, admin_name: str, order_id: str, customer_name: str, amount: float, payment_method: str, payment_date: str):
         subject = f"Payment Successful – Order #{order_id}"
-        html = f"""
-        <p>Hello {admin_name},</p>
-        <p>Payment for order <strong>#{order_id}</strong> was completed successfully.</p>
-        <ul>
-            <li><strong>Customer:</strong> {customer_name}</li>
-            <li><strong>Amount:</strong> ₹{amount:,.2f}</li>
-            <li><strong>Payment Method:</strong> {payment_method}</li>
-            <li><strong>Payment Date:</strong> {payment_date}</li>
-        </ul>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        rows = [
+            ("Order ID", f"#{order_id}"),
+            ("Customer", customer_name),
+            ("Amount", f"₹{amount:,.2f}"),
+            ("Payment Method", payment_method),
+            ("Payment Date", payment_date or "Today"),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="Customer Payment Captured",
+            recipient_name=admin_name,
+            badge_text="Payment Success",
+            body_paragraphs=[
+                f"Payment of <strong>₹{amount:,.2f}</strong> for order <strong>#{order_id}</strong> was captured successfully.",
+            ],
+            key_values=rows,
+        )
         return await self.send_email(admin_email, subject, html)
 
     async def send_admin_payment_failure(self, admin_email: str, admin_name: str, order_id: str, customer_name: str, amount: float, payment_method: str, failure_reason: str):
         subject = f"Payment Failed – Order #{order_id}"
-        html = f"""
-        <p>Hello {admin_name},</p>
-        <p>Payment for order <strong>#{order_id}</strong> has failed.</p>
-        <ul>
-            <li><strong>Customer:</strong> {customer_name}</li>
-            <li><strong>Amount:</strong> ₹{amount:,.2f}</li>
-            <li><strong>Payment Method:</strong> {payment_method}</li>
-            <li><strong>Failure Reason:</strong> {failure_reason}</li>
-        </ul>
-        <p>Please review the order/payment status.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        rows = [
+            ("Order ID", f"#{order_id}"),
+            ("Customer", customer_name),
+            ("Attempted Amount", f"₹{amount:,.2f}"),
+            ("Method", payment_method),
+            ("Failure Reason", failure_reason or "Declined"),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="Order Payment Declined",
+            recipient_name=admin_name,
+            badge_text="Payment Failed",
+            body_paragraphs=[
+                f"Payment attempt for order <strong>#{order_id}</strong> failed.",
+            ],
+            key_values=rows,
+        )
         return await self.send_email(admin_email, subject, html)
 
     async def send_admin_order_cancelled(self, admin_email: str, admin_name: str, order_id: str, customer_name: str, order_total: float, cancelled_at: str, cancellation_reason: str):
         subject = f"Order Cancelled – #{order_id}"
-        html = f"""
-        <p>Hello {admin_name},</p>
-        <p>Order <strong>#{order_id}</strong> has been cancelled.</p>
-        <ul>
-            <li><strong>Customer:</strong> {customer_name}</li>
-            <li><strong>Order Amount:</strong> ₹{order_total:,.2f}</li>
-            <li><strong>Cancelled On:</strong> {cancelled_at}</li>
-            <li><strong>Cancellation Reason:</strong> {cancellation_reason or 'Customer/Admin Action'}</li>
-        </ul>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        rows = [
+            ("Order ID", f"#{order_id}"),
+            ("Customer", customer_name),
+            ("Order Total", f"₹{order_total:,.2f}"),
+            ("Cancelled On", cancelled_at or "Today"),
+            ("Reason", cancellation_reason or "Customer/Admin action"),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="Order Has Been Cancelled",
+            recipient_name=admin_name,
+            badge_text="Order Cancelled",
+            body_paragraphs=[
+                f"Order <strong>#{order_id}</strong> was cancelled.",
+            ],
+            key_values=rows,
+        )
         return await self.send_email(admin_email, subject, html)
 
     async def send_admin_refund_initiated(self, admin_email: str, admin_name: str, order_id: str, customer_name: str, refund_amount: float, refund_reason: str, initiated_at: str):
         subject = f"Refund Initiated – Order #{order_id}"
-        html = f"""
-        <p>Hello {admin_name},</p>
-        <p>A refund has been initiated for order <strong>#{order_id}</strong>.</p>
-        <ul>
-            <li><strong>Customer:</strong> {customer_name}</li>
-            <li><strong>Refund Amount:</strong> ₹{refund_amount:,.2f}</li>
-            <li><strong>Reason:</strong> {refund_reason or 'N/A'}</li>
-            <li><strong>Initiated On:</strong> {initiated_at}</li>
-        </ul>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        rows = [
+            ("Order ID", f"#{order_id}"),
+            ("Customer", customer_name),
+            ("Refund Amount", f"₹{refund_amount:,.2f}"),
+            ("Reason", refund_reason or "N/A"),
+            ("Initiated On", initiated_at or "Today"),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="Refund Process Initiated",
+            recipient_name=admin_name,
+            badge_text="Refund Initiated",
+            body_paragraphs=[
+                f"A refund of <strong>₹{refund_amount:,.2f}</strong> was initiated for order #{order_id}.",
+            ],
+            key_values=rows,
+        )
         return await self.send_email(admin_email, subject, html)
 
     async def send_admin_refund_completed(self, admin_email: str, admin_name: str, order_id: str, customer_name: str, refund_amount: float, refund_date: str):
         subject = f"Refund Completed – Order #{order_id}"
-        html = f"""
-        <p>Hello {admin_name},</p>
-        <p>The refund for order <strong>#{order_id}</strong> has been completed.</p>
-        <ul>
-            <li><strong>Customer:</strong> {customer_name}</li>
-            <li><strong>Refund Amount:</strong> ₹{refund_amount:,.2f}</li>
-            <li><strong>Refund Date:</strong> {refund_date}</li>
-        </ul>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        rows = [
+            ("Order ID", f"#{order_id}"),
+            ("Customer", customer_name),
+            ("Refund Amount", f"₹{refund_amount:,.2f}"),
+            ("Completed On", refund_date or "Today"),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="Refund Successfully Processed",
+            recipient_name=admin_name,
+            badge_text="Refund Completed",
+            body_paragraphs=[
+                f"The refund of <strong>₹{refund_amount:,.2f}</strong> for order #{order_id} has completed.",
+            ],
+            key_values=rows,
+        )
         return await self.send_email(admin_email, subject, html)
 
     async def send_admin_low_stock(self, admin_email: str, admin_name: str, product_name: str, product_sku: str, current_stock: int, threshold: int = 10):
         subject = f"Low Stock Alert – {product_name}"
-        html = f"""
-        <p>Hello {admin_name},</p>
-        <p>A product has reached its low-stock threshold.</p>
-        <ul>
-            <li><strong>Product:</strong> {product_name}</li>
-            <li><strong>SKU:</strong> {product_sku}</li>
-            <li><strong>Current Stock:</strong> {current_stock}</li>
-            <li><strong>Low Stock Threshold:</strong> {threshold}</li>
-        </ul>
-        <p>Please review the inventory.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        rows = [
+            ("Product Name", product_name),
+            ("SKU", product_sku),
+            ("Current Stock", str(current_stock)),
+            ("Alert Threshold", str(threshold)),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="Inventory Alert: Low Stock",
+            recipient_name=admin_name,
+            badge_text="Low Stock Warning",
+            body_paragraphs=[
+                f"Artisanal product <strong>{product_name}</strong> has dropped to <strong>{current_stock}</strong> units.",
+                "Please coordinate with chocolatiers for a fresh production batch.",
+            ],
+            key_values=rows,
+        )
         return await self.send_email(admin_email, subject, html)
 
     async def send_admin_out_of_stock(self, admin_email: str, admin_name: str, product_name: str, product_sku: str, updated_at: str):
         subject = f"Out of Stock – {product_name}"
-        html = f"""
-        <p>Hello {admin_name},</p>
-        <p>The following product is now out of stock.</p>
-        <ul>
-            <li><strong>Product:</strong> {product_name}</li>
-            <li><strong>SKU:</strong> {product_sku}</li>
-            <li><strong>Current Stock:</strong> 0</li>
-            <li><strong>Updated On:</strong> {updated_at}</li>
-        </ul>
-        <p>Please review the inventory and restock when required.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        rows = [
+            ("Product Name", product_name),
+            ("SKU", product_sku),
+            ("Stock Level", "0 Units (Depleted)"),
+            ("Depleted On", updated_at or "Today"),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="Inventory Alert: Out of Stock",
+            recipient_name=admin_name,
+            badge_text="Out of Stock",
+            body_paragraphs=[
+                f"Product <strong>{product_name}</strong> is now completely out of stock on the storefront.",
+            ],
+            key_values=rows,
+        )
         return await self.send_email(admin_email, subject, html)
 
     async def send_admin_offline_sale(self, admin_email: str, admin_name: str, transaction_id: str, company_name: str, transaction_amount: float, payment_method: str, transaction_date: str):
         subject = f"New Offline Sale – #{transaction_id}"
-        html = f"""
-        <p>Hello {admin_name},</p>
-        <p>A new offline sale transaction has been created.</p>
-        <ul>
-            <li><strong>Transaction ID:</strong> #{transaction_id}</li>
-            <li><strong>Company:</strong> {company_name}</li>
-            <li><strong>Amount:</strong> ₹{transaction_amount:,.2f}</li>
-            <li><strong>Payment Method:</strong> {payment_method}</li>
-            <li><strong>Transaction Date:</strong> {transaction_date}</li>
-        </ul>
-        <p>Please review the transaction in Offline Sales.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        rows = [
+            ("Transaction ID", f"#{transaction_id}"),
+            ("Client / Corporate", company_name),
+            ("Amount", f"₹{transaction_amount:,.2f}"),
+            ("Payment Method", payment_method),
+            ("Date", transaction_date or "Today"),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="New Corporate / Offline Sale Recorded",
+            recipient_name=admin_name,
+            badge_text="B2B Offline Sale",
+            body_paragraphs=[
+                f"A new offline sale has been registered for <strong>{company_name}</strong>.",
+            ],
+            key_values=rows,
+        )
         return await self.send_email(admin_email, subject, html)
 
     async def send_admin_offline_sale_update(self, admin_email: str, admin_name: str, transaction_id: str, company_name: str, transaction_amount: float, status: str, updated_at: str):
         subject = f"Offline Sale {status.capitalize()} – #{transaction_id}"
-        html = f"""
-        <p>Hello {admin_name},</p>
-        <p>An offline sale transaction has been {status}.</p>
-        <ul>
-            <li><strong>Transaction ID:</strong> #{transaction_id}</li>
-            <li><strong>Company:</strong> {company_name}</li>
-            <li><strong>Amount:</strong> ₹{transaction_amount:,.2f}</li>
-            <li><strong>Updated On:</strong> {updated_at}</li>
-        </ul>
-        <p>Please review the transaction details.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        rows = [
+            ("Transaction ID", f"#{transaction_id}"),
+            ("Client / Corporate", company_name),
+            ("Amount", f"₹{transaction_amount:,.2f}"),
+            ("Status", status.title()),
+            ("Updated On", updated_at or "Today"),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline=f"Offline Sale {status.capitalize()}",
+            recipient_name=admin_name,
+            badge_text=f"Sale {status.capitalize()}",
+            body_paragraphs=[
+                f"Offline transaction <strong>#{transaction_id}</strong> for {company_name} was marked as {status}.",
+            ],
+            key_values=rows,
+        )
         return await self.send_email(admin_email, subject, html)
 
     async def send_admin_support_request(self, admin_email: str, admin_name: str, customer_name: str, customer_email: str, support_subject: str, support_message: str, created_at: str):
-        subject = "New Customer Support Request"
-        html = f"""
-        <p>Hello {admin_name},</p>
-        <p>A new customer support request has been received.</p>
-        <ul>
-            <li><strong>Customer:</strong> {customer_name}</li>
-            <li><strong>Email:</strong> {customer_email}</li>
-            <li><strong>Subject:</strong> {support_subject}</li>
-            <li><strong>Request:</strong> {support_message}</li>
-            <li><strong>Received On:</strong> {created_at}</li>
-        </ul>
-        <p>Please review and respond from the Support section.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        subject = f"New Customer Support Request: {support_subject}"
+        rows = [
+            ("Customer Name", customer_name),
+            ("Customer Email", customer_email),
+            ("Subject", support_subject),
+            ("Submitted On", created_at or "Today"),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="New Customer Support Request",
+            recipient_name=admin_name,
+            badge_text="Support Ticket",
+            body_paragraphs=[
+                f"A customer inquiry has been submitted by <strong>{customer_name}</strong>:",
+                f'<div style="background-color: #FAF7F2; border-left: 3px solid #D4AF37; padding: 12px 16px; margin: 12px 0; font-style: italic; color: #2D2421;">{support_message}</div>',
+            ],
+            key_values=rows,
+        )
         return await self.send_email(admin_email, subject, html)
 
     async def send_admin_product_alert(self, admin_email: str, admin_name: str, product_name: str, product_sku: str, alert_message: str, alert_date: str):
         subject = f"Product Alert – {product_name}"
-        html = f"""
-        <p>Hello {admin_name},</p>
-        <p>An important product alert requires your attention.</p>
-        <ul>
-            <li><strong>Product:</strong> {product_name}</li>
-            <li><strong>SKU:</strong> {product_sku}</li>
-            <li><strong>Alert:</strong> {alert_message}</li>
-            <li><strong>Date:</strong> {alert_date}</li>
-        </ul>
-        <p>Please review the product from the Admin Dashboard.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        rows = [
+            ("Product", product_name),
+            ("SKU", product_sku),
+            ("Alert Date", alert_date or "Today"),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline=f"Product Alert: {product_name}",
+            recipient_name=admin_name,
+            badge_text="Product Alert",
+            body_paragraphs=[
+                alert_message,
+            ],
+            key_values=rows,
+        )
         return await self.send_email(admin_email, subject, html)
 
     async def send_admin_coupon_alert(self, admin_email: str, admin_name: str, coupon_code: str, coupon_name: str, alert_message: str, alert_date: str):
         subject = f"Coupon Alert – {coupon_code}"
-        html = f"""
-        <p>Hello {admin_name},</p>
-        <p>An important coupon alert requires your attention.</p>
-        <ul>
-            <li><strong>Coupon:</strong> {coupon_code}</li>
-            <li><strong>Coupon Name:</strong> {coupon_name}</li>
-            <li><strong>Alert:</strong> {alert_message}</li>
-            <li><strong>Date:</strong> {alert_date}</li>
-        </ul>
-        <p>Please review the coupon details from the Admin Dashboard.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        rows = [
+            ("Coupon Code", coupon_code),
+            ("Coupon Name", coupon_name),
+            ("Date", alert_date or "Today"),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline=f"Coupon Alert: {coupon_code}",
+            recipient_name=admin_name,
+            badge_text="Coupon Alert",
+            body_paragraphs=[
+                alert_message,
+            ],
+            key_values=rows,
+        )
         return await self.send_email(admin_email, subject, html)
 
     # ==========================================================
-    # 3. CUSTOMER EMAIL NOTIFICATIONS
+    # 3. CUSTOMER EMAIL NOTIFICATIONS (LUXURY RESPONSIVE)
     # ==========================================================
 
     async def send_welcome(self, email: str, name: str):
-        subject = f"Welcome to {self.platform_name}"
-        html = f"""
-        <p>Hello {name},</p>
-        <p>Welcome to {self.platform_name}!</p>
-        <p>Your account has been created successfully.</p>
-        <p><strong>Email:</strong> {email}</p>
-        <p>We are happy to have you with us.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        subject = f"Welcome to {self.platform_name} – Pure Artisanal Indulgence"
+        html = build_welcome_template(name=name, email=email)
         return await self.send_email(email, subject, html, context_label="Welcome")
 
-    async def send_order_confirmation(self, email: str, name: str, order_id: str, total: float, order_date: str = "", payment_status: str = "Pending"):
-        p_status = str(payment_status or "Pending").strip()
-        if p_status.upper() in ("PENDING", "PROCESSING"):
-            p_status_display = "Pending"
-        elif p_status.upper() in ("PAID", "COMPLETED", "SUCCESSFUL"):
-            p_status_display = "Paid"
-        else:
-            p_status_display = p_status.title()
-
+    async def send_order_confirmation(
+        self,
+        email: str,
+        name: str,
+        order_id: str,
+        total: float,
+        order_date: str = "",
+        payment_status: str = "Pending",
+        payment_method: str = "Online Payment",
+        items_html: str = "",
+        delivery_option: str = "Standard Delivery",
+    ):
         subject = f"Order Confirmed – #{order_id}"
-        html = f"""
-        <p>Hello {name},</p>
-        <p>Thank you for your order!</p>
-        <p>Your order has been placed successfully.</p>
-        <ul>
-            <li><strong>Order ID:</strong> #{order_id}</li>
-            <li><strong>Order Date:</strong> {order_date or 'Today'}</li>
-            <li><strong>Total Amount:</strong> ₹{total:,.2f}</li>
-            <li><strong>Payment Status:</strong> {p_status_display}</li>
-        </ul>
-        <p>We will keep you updated about your order.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        html = build_order_confirmation_template(
+            name=name,
+            order_id=order_id,
+            total=total,
+            order_date=order_date,
+            payment_status=payment_status,
+            payment_method=payment_method,
+            items_html=items_html,
+            delivery_option=delivery_option,
+        )
         return await self.send_email(email, subject, html, context_label="Order confirmation")
 
     async def send_payment_successful(self, email: str, name: str, order_id: str, amount: float, payment_method: str, payment_date: str):
         subject = f"Payment Successful – Order #{order_id}"
-        html = f"""
-        <p>Hello {name},</p>
-        <p>Your payment for order <strong>#{order_id}</strong> was successful.</p>
-        <ul>
-            <li><strong>Amount Paid:</strong> ₹{amount:,.2f}</li>
-            <li><strong>Payment Method:</strong> {payment_method}</li>
-            <li><strong>Payment Date:</strong> {payment_date}</li>
-        </ul>
-        <p>Thank you for your purchase.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        base_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173")
+        rows = [
+            ("Order Reference", f"#{order_id}"),
+            ("Amount Paid", f"₹{amount:,.2f}"),
+            ("Payment Method", payment_method),
+            ("Payment Date", payment_date or "Today"),
+            ("Status", "Successful / Verified"),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="Payment Confirmed!",
+            recipient_name=name,
+            badge_text="✓ Payment Successful",
+            body_paragraphs=[
+                f"We have received your payment of <strong>₹{amount:,.2f}</strong> for order <strong>#{order_id}</strong>.",
+                "Your order has moved to our boutique kitchen for artisan preparation.",
+            ],
+            key_values=rows,
+            cta_text="Track Your Order",
+            cta_url=f"{base_url}/dashboard",
+        )
         return await self.send_email(email, subject, html, context_label="Payment success")
 
     async def send_payment_failed(self, email: str, name: str, order_id: str, amount: float, failure_reason: str):
-        subject = f"Payment Failed – Order #{order_id}"
-        html = f"""
-        <p>Hello {name},</p>
-        <p>Unfortunately, your payment for order <strong>#{order_id}</strong> was unsuccessful.</p>
-        <ul>
-            <li><strong>Amount:</strong> ₹{amount:,.2f}</li>
-            <li><strong>Reason:</strong> {failure_reason or 'Transaction declined'}</li>
-        </ul>
-        <p>Please try again or use another payment method if applicable.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        subject = f"Payment Incomplete – Order #{order_id}"
+        base_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173")
+        rows = [
+            ("Order Reference", f"#{order_id}"),
+            ("Attempted Amount", f"₹{amount:,.2f}"),
+            ("Reason", failure_reason or "Declined by bank / network"),
+            ("Status", "Action Required"),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="Payment Could Not Be Completed",
+            recipient_name=name,
+            badge_text="Payment Pending",
+            body_paragraphs=[
+                f"We were unable to process the payment for order <strong>#{order_id}</strong>.",
+                "Your handcrafted selection is currently reserved for you in your dashboard. You may complete the payment using UPI, Cards, or Netbanking.",
+            ],
+            key_values=rows,
+            cta_text="Complete Payment Now",
+            cta_url=f"{base_url}/dashboard",
+        )
         return await self.send_email(email, subject, html, context_label="Payment failure")
 
     async def send_order_processing(self, email: str, name: str, order_id: str):
-        subject = f"Your Order Is Being Processed – #{order_id}"
-        html = f"""
-        <p>Hello {name},</p>
-        <p>Your order <strong>#{order_id}</strong> is now being processed.</p>
-        <p>We will notify you when your order is shipped.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        subject = f"Your Order Is Being Prepared – #{order_id}"
+        base_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173")
+        rows = [
+            ("Order Reference", f"#{order_id}"),
+            ("Status", "Master Chocolatier Handcrafting"),
+            ("Packaging", "Insulated Climate-Controlled Box"),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="Your Chocolates Are Being Handcrafted",
+            recipient_name=name,
+            badge_text="🍫 Kitchen Preparation",
+            body_paragraphs=[
+                f"Your order <strong>#{order_id}</strong> is now in our artisan atelier.",
+                "Our chocolatiers are assembling your fresh batch using single-origin cacao and signature ganache recipes.",
+                "You will receive live courier tracking details as soon as your box is sealed and dispatched.",
+            ],
+            key_values=rows,
+            cta_text="View Order in Dashboard",
+            cta_url=f"{base_url}/dashboard",
+        )
         return await self.send_email(email, subject, html, context_label="Order processing")
 
-    async def send_shipping_update(self, email: str, name: str, order_id: str, tracking_number: str, courier_name: str = "Standard Shipping", estimated_delivery: str = "3-5 Business Days"):
-        subject = f"Your Order Has Been Shipped – #{order_id}"
-        html = f"""
-        <p>Hello {name},</p>
-        <p>Good news! Your order <strong>#{order_id}</strong> has been shipped.</p>
-        <ul>
-            <li><strong>Tracking Number:</strong> {tracking_number}</li>
-            <li><strong>Courier:</strong> {courier_name}</li>
-            <li><strong>Estimated Delivery:</strong> {estimated_delivery}</li>
-        </ul>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+    async def send_shipping_update(
+        self,
+        email: str,
+        name: str,
+        order_id: str,
+        tracking_number: str = "",
+        courier_name: str = "Standard Shipping",
+        estimated_delivery: str = "3-5 Business Days",
+    ):
+        subject = f"Your Order Has Been Dispatched! – #{order_id}"
+        html = build_shipping_template(
+            name=name,
+            order_id=order_id,
+            tracking_number=tracking_number,
+            courier_name=courier_name,
+            estimated_delivery=estimated_delivery,
+        )
         return await self.send_email(email, subject, html, context_label="Order shipped")
 
     async def send_out_for_delivery(self, email: str, name: str, order_id: str, estimated_delivery: str = "Today"):
-        subject = f"Your Order Is Out for Delivery – #{order_id}"
-        html = f"""
-        <p>Hello {name},</p>
-        <p>Your order <strong>#{order_id}</strong> is out for delivery.</p>
-        <p><strong>Estimated Delivery:</strong> {estimated_delivery}</p>
-        <p>Please keep your delivery details available.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        subject = f"Out for Delivery Today! – #{order_id}"
+        html = build_out_for_delivery_template(
+            name=name,
+            order_id=order_id,
+            estimated_delivery=estimated_delivery,
+        )
         return await self.send_email(email, subject, html, context_label="Out for delivery")
 
     async def send_order_delivered(
@@ -477,35 +614,12 @@ class ResendEmailIntegration:
         order_total: float = 0.0,
         order_items_html: str = "",
     ):
-        store_name = getattr(settings, "APP_NAME", "Chovique")
-        subject = f"Your Order Has Been Delivered – {order_id}"
-        items_block = f"<ul>{order_items_html}</ul>" if order_items_html else "<p>N/A</p>"
-        html = f"""
-        <p>Hi {name},</p>
-
-        <p>Great news! 🎉</p>
-
-        <p>Your order {order_id} has been successfully delivered.</p>
-
-        <p><strong>Order Details</strong></p>
-
-        <ul>
-            <li><strong>Order ID:</strong> {order_id}</li>
-            <li><strong>Delivered On:</strong> {delivered_at}</li>
-            <li><strong>Payment Method:</strong> {payment_method}</li>
-            <li><strong>Payment Status:</strong> {payment_status}</li>
-            <li><strong>Total Amount:</strong> ₹{order_total:,.2f}</li>
-        </ul>
-
-        <p><strong>Items Delivered:</strong></p>
-        {items_block}
-
-        <p>We hope you enjoy your chocolates! 🍫</p>
-
-        <p>If you experience any issue with your order, please contact our support team.</p>
-
-        <p>Thank you for choosing {store_name}.</p>
-        """
+        subject = f"Delivered: Your Chovique Chocolates Have Arrived – #{order_id}"
+        html = build_delivered_template(
+            name=name,
+            order_id=order_id,
+            delivery_date=delivered_at or "Today",
+        )
         return await self.send_email(email, subject, html, context_label="Order delivered")
 
     async def send_cancellation(
@@ -521,32 +635,13 @@ class ResendEmailIntegration:
         payment_status: str = "Cancelled",
         order_items_html: str = "",
     ):
-        store_name = getattr(settings, "APP_NAME", "Chovique")
-        subject = f"Order Cancelled – {order_id}"
-        items_block = f"<ul>{order_items_html}</ul>" if order_items_html else "<p>N/A</p>"
-        html = f"""
-        <p>Hi {name},</p>
-
-        <p>Your order {order_id} has been successfully cancelled.</p>
-
-        <p><strong>Order Details</strong></p>
-
-        <ul>
-            <li><strong>Order ID:</strong> {order_id}</li>
-            <li><strong>Order Date:</strong> {order_date}</li>
-            <li><strong>Cancellation Date:</strong> {cancelled_at}</li>
-            <li><strong>Payment Method:</strong> {payment_method}</li>
-            <li><strong>Payment Status:</strong> {payment_status}</li>
-            <li><strong>Total Amount:</strong> ₹{order_total:,.2f}</li>
-        </ul>
-
-        <p><strong>Items:</strong></p>
-        {items_block}
-
-        <p>If you have already made a payment, any applicable refund will be processed according to our existing refund policy.</p>
-
-        <p>Thank you for choosing {store_name}.</p>
-        """
+        subject = f"Order Cancelled – #{order_id}"
+        html = build_cancellation_template(
+            name=name,
+            order_id=order_id,
+            order_total=order_total,
+            cancellation_reason=cancellation_reason,
+        )
         return await self.send_email(email, subject, html, context_label="Order cancellation")
 
     async def send_return_request(
@@ -558,140 +653,103 @@ class ResendEmailIntegration:
         return_reason: str = "Customer Request",
         return_items_html: str = "",
     ):
-        store_name = getattr(settings, "APP_NAME", "Chovique")
-        subject = f"Return Request Received – {order_id}"
-        items_block = f"<ul>{return_items_html}</ul>" if return_items_html else "<p>N/A</p>"
-        html = f"""
-        <p>Hi {name},</p>
-
-        <p>We have successfully received your return request for order {order_id}.</p>
-
-        <p><strong>Return Details</strong></p>
-
-        <ul>
-            <li><strong>Order ID:</strong> {order_id}</li>
-            <li><strong>Return Requested On:</strong> {return_requested_at}</li>
-            <li><strong>Return Status:</strong> Return Requested</li>
-        </ul>
-
-        <p><strong>Items:</strong></p>
-        {items_block}
-
-        <p><strong>Return Reason:</strong><br/>
-        {return_reason or 'Customer Request'}</p>
-
-        <p>Our support team will review your request and update you with the next steps.</p>
-
-        <p>Please keep the product in its original condition and packaging, if applicable.</p>
-
-        <p>Thank you for shopping with {store_name}.</p>
-        """
+        subject = f"Return Request Received – #{order_id}"
+        base_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173")
+        rows = [
+            ("Order Reference", f"#{order_id}"),
+            ("Requested On", return_requested_at or "Today"),
+            ("Reason", return_reason or "Customer request"),
+            ("Status", "Under Concierge Review"),
+        ]
+        html = build_generic_notification_template(
+            subject=subject,
+            headline="Return Request Acknowledged",
+            recipient_name=name,
+            badge_text="Return Requested",
+            body_paragraphs=[
+                f"We have received your return request for order <strong>#{order_id}</strong>.",
+                "Because our confections are perishable luxury items, our concierge team reviews all inquiries within 24 hours to ensure quality standards.",
+            ],
+            key_values=rows,
+            cta_text="Check Ticket in Dashboard",
+            cta_url=f"{base_url}/dashboard",
+        )
         return await self.send_email(email, subject, html, context_label="Return request")
 
     async def send_refund_initiated(self, email: str, name: str, order_id: str, refund_amount: float, initiated_at: str):
         subject = f"Refund Initiated – Order #{order_id}"
-        html = f"""
-        <p>Hello {name},</p>
-        <p>Your refund has been initiated for order <strong>#{order_id}</strong>.</p>
-        <ul>
-            <li><strong>Refund Amount:</strong> ₹{refund_amount:,.2f}</li>
-            <li><strong>Initiated On:</strong> {initiated_at}</li>
-        </ul>
-        <p>You will receive another notification once the refund is completed.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        html = build_refund_template(
+            name=name,
+            order_id=order_id,
+            amount=refund_amount,
+            status="Initiated",
+        )
         return await self.send_email(email, subject, html, context_label="Refund initiated")
 
     async def send_refund_notification(self, email: str, name: str, order_id: str, amount: float, refund_date: str = "", refund_reference: str = ""):
         subject = f"Refund Completed – Order #{order_id}"
-        html = f"""
-        <p>Hello {name},</p>
-        <p>Your refund for order <strong>#{order_id}</strong> has been completed.</p>
-        <ul>
-            <li><strong>Refund Amount:</strong> ₹{amount:,.2f}</li>
-            {f'<li><strong>Refund Date:</strong> {refund_date}</li>' if refund_date else ''}
-            {f'<li><strong>Refund Reference:</strong> {refund_reference}</li>' if refund_reference else ''}
-        </ul>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        html = build_refund_template(
+            name=name,
+            order_id=order_id,
+            amount=amount,
+            reference=refund_reference,
+            status="Completed",
+        )
         return await self.send_email(email, subject, html, context_label="Refund")
 
     async def send_coins_credited(self, email: str, name: str, coins_earned: int, coin_balance: int, credited_at: str):
-        subject = "Coins Credited to Your Account"
-        html = f"""
-        <p>Hello {name},</p>
-        <p><strong>{coins_earned}</strong> coins have been credited to your account.</p>
-        <ul>
-            <li><strong>Current Coin Balance:</strong> {coin_balance}</li>
-            <li><strong>Credited On:</strong> {credited_at}</li>
-        </ul>
-        <p>Thank you for shopping with us.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        subject = "Chovique Reward Coins Added to Your Account!"
+        html = build_coins_template(
+            name=name,
+            event_type="earned",
+            coins=coins_earned,
+            balance=coin_balance,
+        )
         return await self.send_email(email, subject, html, context_label="Coins credit")
 
     async def send_coins_used(self, email: str, name: str, coins_used: int, coin_balance: int, order_id: str):
-        subject = "Coins Used Successfully"
-        html = f"""
-        <p>Hello {name},</p>
-        <p><strong>{coins_used}</strong> coins were used for your purchase.</p>
-        <ul>
-            <li><strong>Remaining Coin Balance:</strong> {coin_balance}</li>
-            <li><strong>Order ID:</strong> #{order_id}</li>
-        </ul>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        subject = f"Chovique Coins Applied to Order #{order_id}"
+        html = build_coins_template(
+            name=name,
+            event_type="used",
+            coins=coins_used,
+            balance=coin_balance,
+            order_id=order_id,
+        )
         return await self.send_email(email, subject, html, context_label="Coins used")
 
     async def send_coins_restored(self, email: str, name: str, coins_restored: int, coin_balance: int, restored_at: str):
-        subject = "Coins Restored to Your Account"
-        html = f"""
-        <p>Hello {name},</p>
-        <p><strong>{coins_restored}</strong> coins have been restored to your account.</p>
-        <ul>
-            <li><strong>Current Coin Balance:</strong> {coin_balance}</li>
-            <li><strong>Restored On:</strong> {restored_at}</li>
-        </ul>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Team</p>
-        """
+        subject = "Chovique Reward Coins Restored"
+        html = build_coins_template(
+            name=name,
+            event_type="restored",
+            coins=coins_restored,
+            balance=coin_balance,
+        )
         return await self.send_email(email, subject, html, context_label="Coins restored")
 
     async def send_ticket_created(self, email: str, name: str, ticket_id: str, category: str, description: str, created_at: str = ""):
-        subject = "Support Request Received"
-        html = f"""
-        <p>Hello {name},</p>
-        <p>We have received your support request.</p>
-        <ul>
-            <li><strong>Ticket ID:</strong> #{ticket_id[:8]}</li>
-            <li><strong>Subject:</strong> {category}</li>
-            {f'<li><strong>Created On:</strong> {created_at}</li>' if created_at else ''}
-        </ul>
-        <p>Our team will review your request and respond as soon as possible.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Support Team</p>
-        """
+        subject = f"Support Request Received – #{ticket_id[:8]}"
+        html = build_ticket_template(
+            name=name,
+            ticket_id=ticket_id[:8],
+            subject_text=category,
+            status="Open",
+            message=description,
+            is_update=False,
+        )
         return await self.send_email(email, subject, html, context_label="Support ticket created")
 
     async def send_ticket_updated(self, email: str, name: str, ticket_id: str, support_subject: str, status: str, support_response: str):
         subject = f"Update on Support Request #{ticket_id[:8]}"
-        html = f"""
-        <p>Hello {name},</p>
-        <p>There is an update to your support request.</p>
-        <ul>
-            <li><strong>Ticket ID:</strong> #{ticket_id[:8]}</li>
-            <li><strong>Subject:</strong> {support_subject}</li>
-            <li><strong>Status:</strong> {status}</li>
-        </ul>
-        <p><strong>Response:</strong><br/>{support_response}</p>
-        <p>Please log in to your account for further details.</p>
-        <br/>
-        <p>Regards,<br/>{self.platform_name} Support Team</p>
-        """
+        html = build_ticket_template(
+            name=name,
+            ticket_id=ticket_id[:8],
+            subject_text=support_subject,
+            status=status,
+            message=support_response,
+            is_update=True,
+        )
         return await self.send_email(email, subject, html, context_label="Support ticket updated")
 
 

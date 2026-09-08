@@ -527,13 +527,27 @@ class CustomerService:
             import asyncio
             user = await self.user_repo.get_by_id(user_id)
             if user and user.email:
+                items_html = ""
+                try:
+                    for it_data in items_data:
+                        prod = await self.product_repo.get_by_id(it_data.get("product_id"))
+                        p_name = prod.name if prod else "Artisanal Chocolate"
+                        qty = it_data.get("quantity", 1)
+                        prc = it_data.get("price", 0.0)
+                        items_html += f"<li><strong>{p_name}</strong> × {qty} — ₹{prc * qty:,.2f}</li>"
+                except Exception:
+                    pass
+
                 asyncio.create_task(
                     resend_email.send_order_confirmation(
                         email=user.email,
-                        name=user.full_name,
+                        name=user.full_name or "Valued Customer",
                         order_id=order.id,
                         total=order.total,
                         payment_status=order.payment_status,
+                        payment_method=order.payment_method or "Cash on Delivery (COD)",
+                        items_html=items_html,
+                        delivery_option=order.delivery_option or "Standard Delivery",
                     )
                 )
         except Exception as e:

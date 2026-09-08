@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     # APPLICATION
     # =========================================================
 
-    APP_NAME: str = "Chovique"
+    APP_NAME: str = "Chovique Chocolatier"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
 
@@ -170,6 +170,7 @@ class Settings(BaseSettings):
     MAIL_USERNAME: str = ""
     MAIL_PASSWORD: str = ""
     MAIL_FROM: str = ""
+    MAIL_FROM_NAME: str = "Chovique Chocolatier"
 
     MAIL_STARTTLS: bool = True
     MAIL_SSL_TLS: bool = False

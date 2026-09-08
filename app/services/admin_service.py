@@ -803,12 +803,16 @@ class AdminService:
                         )
                     )
                 elif new_status == "Shipped":
+                    tracking_code = f"CHV-TRK-{order.id.replace('ORD-', '')}"
+                    courier = getattr(order, "delivery_option", "BlueDart Express") or "BlueDart Express"
                     asyncio.create_task(
                         resend_email.send_shipping_update(
                             email=user.email,
                             name=user.full_name or "Valued Customer",
                             order_id=order.id,
-                            tracking_number="TRACK-" + order.id[-6:],
+                            tracking_number=tracking_code,
+                            courier_name=courier,
+                            estimated_delivery="2-4 Business Days",
                         )
                     )
                 elif new_status == "Out for Delivery":

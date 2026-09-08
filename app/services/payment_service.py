@@ -1,5 +1,6 @@
 import logging
 from typing import Dict, Any
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.razorpay import razorpay_client
@@ -188,6 +189,15 @@ class PaymentService:
                 import asyncio
                 user = await self.user_repo.get_by_id(payment.user_id)
                 if user and user.email:
+                    items_html = ""
+                    try:
+                        if hasattr(order, "items") and order.items:
+                            for it in order.items:
+                                p_name = getattr(it.product, "name", "Artisanal Chocolate") if getattr(it, "product", None) else "Artisanal Chocolate"
+                                items_html += f"<li><strong>{p_name}</strong> × {it.quantity} — ₹{it.price * it.quantity:,.2f}</li>"
+                    except Exception:
+                        pass
+
                     asyncio.create_task(
                         resend_email.send_order_confirmation(
                             email=user.email,
@@ -195,6 +205,9 @@ class PaymentService:
                             order_id=order.id,
                             total=order.total,
                             payment_status=order.payment_status,
+                            payment_method=order.payment_method or "Razorpay / UPI",
+                            items_html=items_html,
+                            delivery_option=getattr(order, "delivery_option", "Standard Delivery") or "Standard Delivery",
                         )
                     )
             except Exception as e:

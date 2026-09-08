@@ -13,10 +13,17 @@ class RazorpayIntegration:
     webhook verification, and refund processing.
     """
 
-    def __init__(self):
-        self.key_id = settings.RAZORPAY_KEY_ID
-        self.key_secret = settings.RAZORPAY_KEY_SECRET
-        self.webhook_secret = settings.RAZORPAY_WEBHOOK_SECRET
+    @property
+    def key_id(self) -> str:
+        return settings.RAZORPAY_KEY_ID
+
+    @property
+    def key_secret(self) -> str:
+        return settings.RAZORPAY_KEY_SECRET
+
+    @property
+    def webhook_secret(self) -> str:
+        return settings.RAZORPAY_WEBHOOK_SECRET
 
     def create_order(
         self,
