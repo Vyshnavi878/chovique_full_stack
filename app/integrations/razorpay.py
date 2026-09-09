@@ -1,16 +1,20 @@
 import hmac
 import hashlib
 import logging
+import time
 from typing import Optional, Dict, Any
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Base URL for Razorpay REST API (QR Codes endpoint not in Python SDK)
+RAZORPAY_API_BASE = "https://api.razorpay.com/v1"
+
 
 class RazorpayIntegration:
     """
-    Razorpay integration wrapper for order creation, signature verification,
-    webhook verification, and refund processing.
+    Razorpay integration wrapper for order creation, QR code generation,
+    signature verification, webhook verification, and refund processing.
     """
 
     @property
@@ -24,6 +28,99 @@ class RazorpayIntegration:
     @property
     def webhook_secret(self) -> str:
         return settings.RAZORPAY_WEBHOOK_SECRET
+
+    def create_qr_code(
+        self,
+        amount: float,
+        razorpay_order_id: str,
+        description: Optional[str] = None,
+        close_by_seconds: int = 600,  # Default: 10 minutes
+    ) -> Dict[str, Any]:
+        """
+        Create a dynamic, fixed-amount, single-use Razorpay QR Code for UPI payments.
+
+        Uses the Razorpay REST API directly (POST /v1/payments/qr_codes) since the
+        Python SDK does not expose this endpoint.
+
+        Args:
+            amount: Amount in major units (INR). Converted to paise internally.
+            razorpay_order_id: The Razorpay Order ID to associate with this QR code.
+            description: Optional description shown in the UPI app.
+            close_by_seconds: Number of seconds from now before the QR code expires.
+                              Razorpay allows 5–15 minutes (300–900 seconds).
+
+        Returns:
+            Razorpay QR Code entity dict containing: id, image_url, close_by, etc.
+        """
+        try:
+            import httpx
+        except ImportError:
+            logger.error("httpx package is not installed. Required for QR Code API.")
+            raise RuntimeError("httpx is required for QR Code payments. Run: pip install httpx")
+
+        amount_in_paise = int(round(amount * 100))
+        close_by_ts = int(time.time()) + close_by_seconds
+
+        payload = {
+            "type": "upi_qr",
+            "name": description or "Chovique Payment",
+            "usage": "single_use",
+            "fixed_amount": True,
+            "payment_amount": amount_in_paise,
+            "description": description or f"Payment for Order {razorpay_order_id}",
+            "close_by": close_by_ts,
+            "notes": {
+                "razorpay_order_id": razorpay_order_id,
+            },
+        }
+
+        try:
+            response = httpx.post(
+                f"{RAZORPAY_API_BASE}/payments/qr_codes",
+                auth=(self.key_id, self.key_secret),
+                json=payload,
+                timeout=15.0,
+            )
+            response.raise_for_status()
+            qr_data = response.json()
+            logger.info(
+                "Created Razorpay QR Code %s for order %s, amount ₹%.2f, expires at %s",
+                qr_data.get("id"), razorpay_order_id, amount, close_by_ts,
+            )
+            return qr_data
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text
+            logger.error("Razorpay QR Code API error: %s — %s", e.response.status_code, error_body)
+            raise ValueError(f"Razorpay QR Code creation failed: {error_body}")
+        except Exception as e:
+            logger.error("Razorpay QR Code creation error: %s", e)
+            raise ValueError(f"Razorpay QR Code creation failed: {e}")
+
+    def close_qr_code(self, qr_code_id: str) -> Dict[str, Any]:
+        """
+        Close (expire) an active Razorpay QR Code early.
+        Useful for cleanup when the user cancels or retries.
+        """
+        try:
+            import httpx
+        except ImportError:
+            raise RuntimeError("httpx is required for QR Code payments.")
+
+        try:
+            response = httpx.post(
+                f"{RAZORPAY_API_BASE}/payments/qr_codes/{qr_code_id}/close",
+                auth=(self.key_id, self.key_secret),
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            logger.info("Closed Razorpay QR Code %s", qr_code_id)
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            logger.warning("Could not close QR Code %s: %s", qr_code_id, e.response.text)
+            return {}
+        except Exception as e:
+            logger.warning("Could not close QR Code %s: %s", qr_code_id, e)
+            return {}
 
     def create_order(
         self,

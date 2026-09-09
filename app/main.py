@@ -69,6 +69,9 @@ async def lifespan(app: FastAPI):
                     await autocommit_conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS returned_at TIMESTAMP WITH TIME ZONE;"))
                     await autocommit_conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS return_reason TEXT;"))
                     await autocommit_conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;"))
+                    # UPI QR Code payment support
+                    await autocommit_conn.execute(text("ALTER TABLE payments ADD COLUMN IF NOT EXISTS qr_code_id VARCHAR(100);"))
+                    await autocommit_conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_payments_qr_code_id ON payments (qr_code_id) WHERE qr_code_id IS NOT NULL;"))
                 except Exception as ex:
                     logger.warning("Auto migration note: %s", ex)
                 logger.info("Database auto-migrations executed successfully.")

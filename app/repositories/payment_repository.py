@@ -64,3 +64,20 @@ class PaymentRepository:
         )
         await self.db.commit()
         return await self.get_by_razorpay_order_id(razorpay_order_id)
+
+    async def get_by_qr_code_id(self, qr_code_id: str) -> Payment | None:
+        """Look up a Payment record by its associated Razorpay QR Code ID."""
+        result = await self.db.execute(
+            select(Payment).where(Payment.qr_code_id == qr_code_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def set_qr_code_id(self, razorpay_order_id: str, qr_code_id: str) -> Payment | None:
+        """Store the Razorpay QR Code ID on the Payment record."""
+        await self.db.execute(
+            update(Payment)
+            .where(Payment.razorpay_order_id == razorpay_order_id)
+            .values(qr_code_id=qr_code_id)
+        )
+        await self.db.commit()
+        return await self.get_by_razorpay_order_id(razorpay_order_id)

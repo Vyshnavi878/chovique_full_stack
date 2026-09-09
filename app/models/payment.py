@@ -14,6 +14,7 @@ class Payment(Base):
     razorpay_order_id = Column(String(100), unique=True, nullable=False, index=True)
     razorpay_payment_id = Column(String(100), unique=True, nullable=True, index=True)
     razorpay_signature = Column(String(255), nullable=True)
+    qr_code_id = Column(String(100), unique=True, nullable=True, index=True)  # Set for UPI QR payments
     amount = Column(Float, nullable=False)
     currency = Column(String(10), default="INR", nullable=False)
     status = Column(String(50), default="created", nullable=False, index=True)  # created, captured, failed
