@@ -243,13 +243,17 @@ async def chat(
                 prod_repo = ProductRepository(db)
                 prod_res = await prod_repo.get_all(per_page=50)
                 for p in prod_res.get("items", []):
+                    cat_name = getattr(p, "category", "") or (p.category_rel.name if getattr(p, "category_rel", None) else "")
                     catalog.append({
                         "id": str(p.id),
                         "name": p.name,
                         "price": f"₹{p.price:.0f}" if p.price else "₹0",
-                        "category": getattr(p, "category", "") or "",
+                        "category": cat_name,
                         "image": p.image or "",
-                        "description": (p.description or "")[:120],
+                        "description": (p.description or "")[:200],
+                        "is_bestseller": bool(p.is_bestseller),
+                        "is_featured": bool(p.is_featured),
+                        "rating": float(p.rating or 0.0),
                     })
             except Exception as p_err:
                 logger.warning("Could not fetch products for chatbot context: %s", p_err)
