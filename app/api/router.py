@@ -9,6 +9,7 @@ from app.api.v1 import (
     auth,
     cart,
     categories,
+    chat,
     checkout,
     contact,
     coupons,
@@ -53,6 +54,7 @@ api_router.include_router(refunds.router)
 api_router.include_router(tickets.router)
 api_router.include_router(coupons.router)
 api_router.include_router(contact.router)
+api_router.include_router(chat.router)
 api_router.include_router(admin.router)
 api_router.include_router(admin_dashboard.router)
 api_router.include_router(admin_notifications.router)
