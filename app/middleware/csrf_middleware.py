@@ -20,6 +20,7 @@ CSRF_EXEMPT_PATHS = {
     "/api/v1/payments/verify",
     "/api/v1/orders",
     "/api/v1/chat",  # Stateless AI query — no user data mutation
+    "/api/v1/contact",  # Public customer & guest contact form
 }
 
 

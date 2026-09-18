@@ -69,5 +69,7 @@ class OrderResponse(BaseModel):
     is_returnable: bool = False
     created_at: Optional[datetime] = None
     delivered_at: Optional[datetime] = None
+    customer_whatsapp_url: Optional[str] = None
+    owner_whatsapp_url: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)

@@ -14,3 +14,4 @@ class ContactMessageRequest(BaseModel):
 
 class ContactMessageResponse(BaseModel):
     message: str
+    whatsapp_url: Optional[str] = None

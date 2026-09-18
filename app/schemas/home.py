@@ -81,8 +81,8 @@ class StatsResponse(BaseModel):
 
 class ContactInfoResponse(BaseModel):
     email: str = "support@chovique.com"
-    phone: str = "+91 98765 43210"
-    whatsapp: str = "+91 98765 43210"
+    phone: str = "+91 83098 54870"
+    whatsapp: str = "+91 83098 54870"
     support_hours: str = "Mon - Sat: 10:00 AM - 8:00 PM | Sunday: 11:00 AM - 6:00 PM"
     address: str = "42, MG Road, Indiranagar, Bangalore, Karnataka 560038"
     instagram: str = "https://instagram.com"

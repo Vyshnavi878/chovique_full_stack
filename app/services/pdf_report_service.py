@@ -384,7 +384,7 @@ class PdfReportService:
 
         # Header Table (Brand Left, Invoice Info Right)
         brand_p = Paragraph("CHOVIQUE", title_style)
-        brand_sub_p = Paragraph("PREMIUM HANDMADE CHOCOLATES<br/><font size=7 color='#666666'>Chovique Chocolates Pvt. Ltd.<br/>123, Chocolate Lane, Hitec City, Hyderabad, Telangana - 500081<br/>Email: hello@chovique.com | Phone: +91 98765 43210<br/>GSTIN: 36ABCDE1234F1ZS</font>", body_style)
+        brand_sub_p = Paragraph("PREMIUM HANDMADE CHOCOLATES<br/><font size=7 color='#666666'>Chovique Chocolates Pvt. Ltd.<br/>123, Chocolate Lane, Hitec City, Hyderabad, Telangana - 500081<br/>Email: hello@chovique.com | Phone: +91 83098 54870<br/>GSTIN: 36ABCDE1234F1ZS</font>", body_style)
 
         inv_title_p = Paragraph("INVOICE", right_title_style)
         

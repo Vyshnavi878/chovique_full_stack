@@ -210,8 +210,8 @@ class HomeService:
 
         return ContactInfoResponse(
             email=contact_data.get("email", "support@chovique.com"),
-            phone=contact_data.get("phone", "+91 98765 43210"),
-            whatsapp=contact_data.get("whatsapp", "+91 98765 43210"),
+            phone=contact_data.get("phone", "+91 83098 54870"),
+            whatsapp=contact_data.get("whatsapp", "+91 83098 54870"),
             support_hours=contact_data.get("support_hours", "Mon - Sat: 10:00 AM - 8:00 PM | Sunday: 11:00 AM - 6:00 PM"),
             address=contact_data.get("address", "42, MG Road, Indiranagar, Bangalore, Karnataka 560038"),
             instagram=contact_data.get("instagram", "https://instagram.com"),

@@ -87,6 +87,8 @@ class UserResponse(BaseModel):
     email: str
     role: str
     profile: UserProfileSchema
+    avatar_url: Optional[str] = None
+    avatar: Optional[str] = None
 
     # Additional status fields (optional usage on frontend)
     is_email_verified: bool = False
@@ -97,29 +99,51 @@ class UserResponse(BaseModel):
 
     @classmethod
     def from_orm_user(cls, user):
+        user_dict = getattr(user, "__dict__", {})
+
+        full_name = user_dict.get("full_name") or getattr(user, "full_name", "") or ""
+        email = user_dict.get("email") or getattr(user, "email", "") or ""
+        role = user_dict.get("role") or getattr(user, "role", "customer") or "customer"
+        user_id = str(user_dict.get("id") or getattr(user, "id", ""))
+        phone = user_dict.get("phone") or getattr(user, "phone", "") or ""
+        dob = user_dict.get("dob") or getattr(user, "dob", None)
+        gender = user_dict.get("gender") or getattr(user, "gender", None)
+        is_email_verified = user_dict.get("is_email_verified", getattr(user, "is_email_verified", True))
+        is_active = user_dict.get("is_active", getattr(user, "is_active", True))
+        has_password = bool(user_dict.get("hashed_password") or getattr(user, "hashed_password", None))
+
+        avatar_url = user_dict.get("avatar_url")
+        if avatar_url is None:
+            try:
+                avatar_url = user.avatar_url
+            except Exception:
+                avatar_url = None
+
         initials = ""
-        if user.full_name:
-            initials = "".join(p[0].upper() for p in user.full_name.split()[:2])
+        if full_name:
+            initials = "".join(p[0].upper() for p in full_name.split()[:2])
 
         return cls(
-            id=str(user.id),
-            name=user.full_name,
-            email=user.email,
-            role=user.role,
+            id=user_id,
+            name=full_name,
+            email=email,
+            role=role,
+            avatar_url=avatar_url,
+            avatar=initials,
             profile=UserProfileSchema(
-                name=user.full_name,
-                email=user.email,
-                phone=user.phone or "",
+                name=full_name,
+                email=email,
+                phone=phone,
                 avatar=initials,
-                avatarUrl=user.avatar_url,
-                dob=user.dob.strftime("%Y-%m-%d") if user.dob else None,
-                gender=user.gender,
+                avatarUrl=avatar_url,
+                dob=dob.strftime("%Y-%m-%d") if dob else None,
+                gender=gender,
                 preferences=None,
                 address=AddressSchema(),
             ),
-            is_email_verified=user.is_email_verified,
-            is_active=user.is_active,
-            has_password=bool(user.hashed_password),
+            is_email_verified=is_email_verified,
+            is_active=is_active,
+            has_password=has_password,
         )
 
 
@@ -140,6 +164,8 @@ class SystemUserResponse(BaseModel):
     name: str
     email: str
     role: str
+    avatar_url: Optional[str] = None
+    avatar: Optional[str] = None
     permissions: PermissionsSchema
 
     model_config = ConfigDict(from_attributes=True)
@@ -150,11 +176,14 @@ class SystemUserResponse(BaseModel):
         # Derive permissions from role
         is_superadmin = (role == "superadmin")
         is_admin = (role in ("admin", "superadmin"))
+        initials = "".join(p[0].upper() for p in (user.full_name or "").split()[:2])
         return cls(
             id=str(user.id),
             name=user.full_name or "",
             email=user.email or "",
             role=role,
+            avatar_url=user.avatar_url,
+            avatar=initials,
             permissions=PermissionsSchema(
                 viewAnalytics=is_admin,
                 manageUsers=is_superadmin,

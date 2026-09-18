@@ -1,5 +1,7 @@
 import logging
 import os
+import re
+import urllib.parse
 import uuid
 from datetime import datetime, timezone
 
@@ -18,6 +20,9 @@ from app.repositories.reel_repository import ReelRepository
 from app.repositories.review_repository import ReviewRepository
 from app.repositories.ticket_repository import TicketRepository
 from app.repositories.user_repository import UserRepository
+from app.repositories.site_config_repository import SiteConfigRepository
+from app.core.config import settings
+from app.services.mail_service import MailService
 
 from app.schemas.contact import ContactMessageRequest, ContactMessageResponse
 from app.schemas.coupon import CouponValidationRequest, CouponValidationResponse, UserCouponResponse
@@ -66,6 +71,7 @@ class CustomerService:
         self.review_repo = ReviewRepository(db)
         self.product_repo = ProductRepository(db)
         self.reel_repo = ReelRepository(db)
+        self.config_repo = SiteConfigRepository(db)
 
     # ==========================================================
     # Profile & Avatar
@@ -826,6 +832,39 @@ class CustomerService:
                 if diff_days < 4.0:
                     is_returnable = True
 
+        # Generate WhatsApp order confirmation links
+        cust_phone_clean = re.sub(r"\D", "", str(ship_addr.phone or "")) if ship_addr else ""
+        if cust_phone_clean and len(cust_phone_clean) == 10:
+            cust_phone_clean = "91" + cust_phone_clean
+
+        owner_whatsapp = "+91 83098 54870"
+        owner_phone_clean = re.sub(r"\D", "", str(owner_whatsapp))
+
+        items_summary = []
+        for it in cart_items:
+            pname = it.product.name if hasattr(it.product, "name") else "Chocolate"
+            items_summary.append(f"• {pname} × {it.quantity} (₹{it.price * it.quantity:,.2f})")
+        items_str = "\n".join(items_summary) if items_summary else "• Artisanal Chocolates"
+
+        order_receipt_text = (
+            f"🍫 *CHOVIQUE — Order Confirmation*\n\n"
+            f"Thank you for ordering with Chovique Luxury Chocolates!\n\n"
+            f"📦 *Order ID:* {order.id}\n"
+            f"📅 *Date:* {created_date}\n"
+            f"💳 *Payment Method:* {order.payment_method or 'UPI'}\n"
+            f"💰 *Total Amount:* ₹{float(order.total or 0.0):,.2f}\n"
+            f"🚚 *Delivery:* {str(order.delivery_option or 'Standard Delivery')}\n\n"
+            f"📍 *Shipping Address:*\n"
+            f"{ship_addr.name}\n"
+            f"{ship_addr.street}, {ship_addr.city}, {ship_addr.state} - {ship_addr.zip}\n"
+            f"Phone: {ship_addr.phone}\n\n"
+            f"✨ *Items:*\n{items_str}\n\n"
+            f"For support, contact Chovique Concierge at +91 83098 54870 or hello@chovique.com."
+        )
+        encoded_receipt = urllib.parse.quote(order_receipt_text)
+        customer_whatsapp_url = f"https://wa.me/{cust_phone_clean}?text={encoded_receipt}" if cust_phone_clean else None
+        owner_whatsapp_url = f"https://wa.me/{owner_phone_clean}?text={encoded_receipt}" if owner_phone_clean else None
+
         return OrderResponse(
             id=str(order.id),
             items=cart_items,
@@ -851,6 +890,8 @@ class CustomerService:
             is_returnable=is_returnable,
             created_at=getattr(order, "created_at", None),
             delivered_at=getattr(order, "delivered_at", None),
+            customer_whatsapp_url=customer_whatsapp_url,
+            owner_whatsapp_url=owner_whatsapp_url,
         )
 
     # ==========================================================
@@ -1132,8 +1173,105 @@ class CustomerService:
             message=payload.message,
         )
 
+        # Retrieve configured contact details (email, WhatsApp)
+        contact_email = None
+        owner_whatsapp = "+91 83098 54870"
+        try:
+            contact_data = await self.config_repo.get("contact")
+            if contact_data and isinstance(contact_data, dict):
+                contact_email = contact_data.get("email")
+                owner_whatsapp = contact_data.get("whatsapp") or owner_whatsapp
+        except Exception as cfg_err:
+            logger.warning("Could not fetch contact configuration: %s", cfg_err)
+
+        # Generate WhatsApp prefilled message and direct link to owner
+        clean_phone = re.sub(r"\D", "", str(owner_whatsapp))
+        wa_text = (
+            f"🍫 *New Customer Inquiry - CHOVIQUE*\n\n"
+            f"👤 *From:* {name}\n"
+            f"✉️ *Email:* {payload.email}\n"
+            f"📞 *Phone:* {payload.phone or 'Not provided'}\n"
+            f"📋 *Subject:* {payload.subject or 'General Inquiry'}\n\n"
+            f"💬 *Message:*\n{payload.message}\n"
+        )
+        whatsapp_url = f"https://wa.me/{clean_phone}?text={urllib.parse.quote(wa_text)}" if clean_phone else None
+
+        # Build luxury HTML email notification for the company
+        email_html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0b0705; color: #f5efe6; margin: 0; padding: 24px; }}
+    .container {{ max-width: 600px; margin: 0 auto; background-color: #170f0b; border: 1px solid #c9a84c; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.6); }}
+    .header {{ background-color: #231610; padding: 26px 20px; text-align: center; border-bottom: 1px solid rgba(201,168,76,0.3); }}
+    .header h1 {{ color: #c9a84c; margin: 0; font-size: 22px; letter-spacing: 2px; text-transform: uppercase; }}
+    .content {{ padding: 28px 24px; }}
+    .row {{ margin-bottom: 18px; }}
+    .label {{ font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #c9a84c; margin-bottom: 6px; font-weight: 600; }}
+    .value {{ font-size: 15px; color: #f5efe6; background: rgba(255,255,255,0.05); padding: 12px 14px; border-radius: 6px; border: 1px solid rgba(201,168,76,0.2); }}
+    .msg-box {{ font-size: 15px; color: #f5efe6; background: rgba(255,255,255,0.07); padding: 16px; border-radius: 6px; border-left: 3px solid #c9a84c; line-height: 1.6; white-space: pre-wrap; }}
+    .footer {{ padding: 16px 20px; text-align: center; font-size: 12px; color: rgba(245,239,230,0.6); border-top: 1px solid rgba(201,168,76,0.2); }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>New Customer Inquiry</h1>
+    </div>
+    <div class="content">
+      <div class="row">
+        <div class="label">Customer Name</div>
+        <div class="value">{name}</div>
+      </div>
+      <div class="row">
+        <div class="label">Email Address</div>
+        <div class="value"><a href="mailto:{payload.email}" style="color: #c9a84c; text-decoration: none;">{payload.email}</a></div>
+      </div>
+      <div class="row">
+        <div class="label">Phone Number</div>
+        <div class="value">{payload.phone or 'Not provided'}</div>
+      </div>
+      <div class="row">
+        <div class="label">Subject</div>
+        <div class="value">{payload.subject or 'General Inquiry'}</div>
+      </div>
+      <div class="row">
+        <div class="label">Message</div>
+        <div class="msg-box">{payload.message}</div>
+      </div>
+    </div>
+    <div class="footer">
+      Sent from Chovique Chocolatier Contact Concierge
+    </div>
+  </div>
+</body>
+</html>
+"""
+        # Collect distinct recipients for company notification
+        recipients = list(dict.fromkeys(filter(None, [
+            contact_email,
+            getattr(settings, "SUPERADMIN_EMAIL", None),
+            getattr(settings, "MAIL_FROM", None),
+        ])))
+        if not recipients:
+            recipients = ["support@chovique.com"]
+
+        for recipient in recipients:
+            try:
+                await MailService.send_generic_email(
+                    email=recipient,
+                    subject=f"[Chovique Inquiry] {payload.subject or 'Customer Message'} from {name}",
+                    html_content=email_html,
+                    context_label="Customer Contact Inquiry",
+                )
+            except Exception as mail_err:
+                logger.error("Failed to send contact inquiry email to %s: %s", recipient, mail_err)
+
         return ContactMessageResponse(
-            message="Thanks — we'll get back to you within 24 hours."
+            message="Thanks — we'll get back to you within 24 hours.",
+            whatsapp_url=whatsapp_url,
         )
 
     # ==========================================================

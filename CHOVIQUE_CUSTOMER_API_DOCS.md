@@ -87,7 +87,7 @@ Fully hardcoded: 4 process `steps`, 3 `coreValues`, and 3 embedded press-quote b
 
 Two separate things happening here:
 
-**a) Displaying contact info (address, phone `+91 98765 43210`, email `hello@chovique.com`)**
+**a) Displaying contact info (address, phone `+91 83098 54870`, email `hello@chovique.com`)**
 - 🟢 Backend ready: `GET /home/contact` → `ContactInfoResponse {email, phone, address, instagram, facebook, twitter}` already matches. Just hardcoded in the component right now — swap for a fetch on mount.
 
 **b) The contact form itself (name, email, phone, subject, message)**

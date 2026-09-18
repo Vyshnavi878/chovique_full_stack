@@ -1046,6 +1046,8 @@ class AdminService:
                     reward_coins=wallet.coin_balance if wallet else 0,
                     joined_date=u.created_at.strftime("%b %Y") if u.created_at else "",
                     created_at=u.created_at.strftime("%Y-%m-%d") if u.created_at else "",
+                    avatar_url=u.avatar_url,
+                    avatar="".join(p[0].upper() for p in (u.full_name or "").split()[:2]),
                 )
             )
 

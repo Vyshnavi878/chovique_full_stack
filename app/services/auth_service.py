@@ -446,6 +446,11 @@ class AuthService:
             datetime.now(timezone.utc),
         )
 
+        try:
+            await self.db.refresh(user)
+        except Exception:
+            pass
+
         logger.info("Login successful for user_id=%s", user.id)
 
         return {
@@ -504,6 +509,16 @@ class AuthService:
                 )
                 user.google_id = google_user["google_id"]
 
+        else:
+            # Existing Google user - ensure latest Google profile DP is synced if not using custom uploaded avatar
+            if google_user.get("avatar_url") and (not user.avatar_url or "googleusercontent.com" in user.avatar_url):
+                user.avatar_url = google_user["avatar_url"]
+                await self.user_repo.update_google_data(
+                    user.id,
+                    google_id=google_user["google_id"],
+                    avatar_url=google_user["avatar_url"],
+                )
+
         # 3. First time Google user (neither google_id nor email exists)
         if not user:
             user = await self.user_repo.create(
@@ -559,6 +574,11 @@ class AuthService:
             user.id,
             datetime.now(timezone.utc),
         )
+
+        try:
+            await self.db.refresh(user)
+        except Exception:
+            pass
 
         logger.info("Google login successful for user_id=%s", user.id)
 

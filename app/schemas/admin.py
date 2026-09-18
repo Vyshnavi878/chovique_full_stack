@@ -101,6 +101,8 @@ class CustomerListItem(BaseModel):
     reward_coins: int = 0
     joined_date: str = ""
     created_at: str = ""
+    avatar_url: Optional[str] = None
+    avatar: Optional[str] = None
 
 
 class CustomerSummaryStats(BaseModel):
@@ -511,8 +513,8 @@ class SetStatsRequest(BaseModel):
 
 class SetContactRequest(BaseModel):
     email: Optional[str] = "support@chovique.com"
-    phone: Optional[str] = "+91 98765 43210"
-    whatsapp: Optional[str] = "+91 98765 43210"
+    phone: Optional[str] = "+91 83098 54870"
+    whatsapp: Optional[str] = "+91 83098 54870"
     support_hours: Optional[str] = "Mon - Sat: 10:00 AM - 8:00 PM | Sunday: 11:00 AM - 6:00 PM"
     address: Optional[str] = "42, MG Road, Indiranagar, Bangalore, Karnataka 560038"
     instagram: Optional[str] = "https://instagram.com"

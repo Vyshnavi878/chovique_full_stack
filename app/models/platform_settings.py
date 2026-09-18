@@ -16,7 +16,7 @@ class PlatformSettings(Base):
     # ── Store Configuration ────────────────────────────────────────────────
     store_front_name = Column(String(200), nullable=False, default="Chovique Luxury Chocolates")
     support_email = Column(String(255), nullable=False, default="support@chovique.com")
-    support_phone = Column(String(30), nullable=False, default="+91 98765 43210")
+    support_phone = Column(String(30), nullable=False, default="+91 83098 54870")
     store_address = Column(Text, nullable=True, default="")
     city = Column(String(100), nullable=True, default="")
     state = Column(String(100), nullable=True, default="")

@@ -111,7 +111,7 @@ class PlatformSettingsService:
         defaults = {
             "store_front_name": "Chovique Luxury Chocolates",
             "support_email": "support@chovique.com",
-            "support_phone": "+91 98765 43210",
+            "support_phone": "+91 83098 54870",
             "store_address": "",
             "city": "",
             "state": "",

@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS platform_settings (
     -- Store Configuration
     store_front_name                VARCHAR(200)  NOT NULL DEFAULT 'Chovique Luxury Chocolates',
     support_email                   VARCHAR(255)  NOT NULL DEFAULT 'support@chovique.com',
-    support_phone                   VARCHAR(30)   NOT NULL DEFAULT '+91 98765 43210',
+    support_phone                   VARCHAR(30)   NOT NULL DEFAULT '+91 83098 54870',
     store_address                   TEXT                   DEFAULT '',
     city                            VARCHAR(100)           DEFAULT '',
     state                           VARCHAR(100)           DEFAULT '',
@@ -74,7 +74,7 @@ INSERT INTO platform_settings (
     return_refund_enabled, maintenance_mode, admin_session_timeout,
     max_login_attempts, account_lockout_duration
 ) VALUES (
-    'singleton', 'Chovique Luxury Chocolates', 'support@chovique.com', '+91 98765 43210',
+    'singleton', 'Chovique Luxury Chocolates', 'support@chovique.com', '+91 83098 54870',
     '', '', '', 'India', '',
     'INR', 'Asia/Kolkata', 'active',
     TRUE, 18.0, 0.0, 50.0,
