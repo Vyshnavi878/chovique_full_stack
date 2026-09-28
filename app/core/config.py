@@ -52,21 +52,24 @@ class Settings(BaseSettings):
         value = value.strip()
 
         if value.startswith("postgres://"):
-            return value.replace(
+            value = value.replace(
                 "postgres://",
                 "postgresql+asyncpg://",
                 1,
             )
-
-        if (
+        elif (
             value.startswith("postgresql://")
             and not value.startswith("postgresql+asyncpg://")
         ):
-            return value.replace(
+            value = value.replace(
                 "postgresql://",
                 "postgresql+asyncpg://",
                 1,
             )
+
+        # asyncpg does not accept 'sslmode', it requires 'ssl'
+        if "sslmode=" in value:
+            value = value.replace("sslmode=", "ssl=")
 
         return value
 

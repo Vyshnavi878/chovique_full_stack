@@ -41,8 +41,16 @@ async def lifespan(app: FastAPI):
     logger.info("Starting %s v%s", settings.APP_NAME, settings.APP_VERSION)
 
     # Create tables
-    await init_db()
-    logger.info("Database tables initialized.")
+    try:
+        await init_db()
+        logger.info("Database tables initialized.")
+    except Exception as e:
+        logger.error(
+            "Database connection failed during startup: %s. "
+            "Please check DATABASE_URL in .env and verify your database instance is active and reachable.",
+            e,
+        )
+        raise
 
     # Additional enum & type migrations for PostgreSQL
     try:
